@@ -19,6 +19,10 @@ type App struct {
 
 var registry ModuleRegistry
 
+func RegisterModule(name string, factory ModuleFactory) {
+	registry.Register(name, factory)
+}
+
 func (a *App) Run() error {
 	// initialize logger
 	l := logger.NewLogrusLogger()
@@ -30,7 +34,12 @@ func (a *App) Run() error {
 	a.config = config.NewViper(a.name)
 	logger.Trace(ctx, logger.Message("config loaded"))
 
+	// load logger options
+	// l.Init(ctx, a.config)
+	// defer l.Close(ctx)
+
 	runner.Run(ctx, runner.OperationFunc(func(ctx context.Context) error {
+		logger.Trace(ctx, logger.Message("running application..."))
 		err := a.run(ctx)
 		if err != nil {
 			logger.Error(ctx, logger.Message("running app error with err=", err))
@@ -39,6 +48,7 @@ func (a *App) Run() error {
 		cancel()
 		return err
 	})).OnSignal(runner.SignalHandlerFunc(func(ctx context.Context, sig os.Signal) {
+		logger.Trace(ctx, logger.Message("application closed"))
 		if sig == syscall.SIGHUP {
 			return
 		}
@@ -56,6 +66,13 @@ func (a *App) run(ctx context.Context) error {
 
 	moduleFactories := registry.Load()
 	modules := make([]api.Module, len(moduleFactories))
+
+	logger.Trace(ctx, logger.Message("initalizing hook..."))
+	if err := a.hook.Init(ctx, a.config); err != nil {
+		return err
+	}
+	defer a.hook.Close(ctx)
+	logger.Trace(ctx, logger.Message("hook initialized"))
 
 	// instantiate all modules
 	logger.Trace(ctx, logger.Message("loading modules..."))
@@ -95,9 +112,9 @@ func (a *App) run(ctx context.Context) error {
 	return <-waiter.Wait()
 }
 
-func New(name string, hook Hook) *App {
+func New(name string, hooks ...Hook) *App {
 	return &App{
 		name: name,
-		hook: hook,
+		hook: &chainedHook{hooks: hooks},
 	}
 }

@@ -32,5 +32,7 @@ func (l *LogrusLogger) Log(level Level, msg *MessageLog) {
 }
 
 func NewLogrusLogger() *LogrusLogger {
-	return &LogrusLogger{logrus: logrus.New()}
+	l := logrus.New()
+	l.SetLevel(logrus.TraceLevel)
+	return &LogrusLogger{logrus: l}
 }

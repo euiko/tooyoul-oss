@@ -21,12 +21,11 @@ const (
 	TraceLevel
 )
 
-const (
-	loggerContextKey = "logger"
-)
+type key int
 
 var (
-	ErrNoLogger = errors.New("no logger available")
+	loggerContextKey key
+	ErrNoLogger      = errors.New("no logger available")
 )
 
 type (

@@ -1,6 +1,9 @@
 package main
 
-import "github.com/euiko/tooyoul/mineman/lib/app"
+import (
+	"github.com/euiko/tooyoul/mineman/lib/app"
+	_ "github.com/euiko/tooyoul/mineman/modules/hello"
+)
 
 func main() {
 	app := app.New("mineman", app.NewWebHook())

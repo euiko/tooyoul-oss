@@ -30,6 +30,8 @@ type (
 
 func (h *WebHook) Init(ctx context.Context, c config.Config) error {
 	h.c = c
+	logger.Debug(ctx, logger.Message(c.Get("wen.enabled").Bool()))
+
 	if err := h.c.Get("web").Scan(&h.option); err != nil {
 		return err
 	}
@@ -109,6 +111,7 @@ func (h *WebHook) handleWithMiddlewares(handler http.Handler, mws ...api.Middlew
 }
 
 func (h *WebHook) start(ctx context.Context) {
+	logger.Trace(ctx, logger.Message("starting web service..."))
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error(ctx, logger.Message("failed when listen and serve http err=", err))
 		h.errChan <- err
@@ -119,7 +122,10 @@ func (h *WebHook) start(ctx context.Context) {
 }
 
 func (h *WebHook) stop(ctx context.Context) error {
-	return h.server.Close()
+	logger.Trace(ctx, logger.Message("stopping web service..."))
+	err := h.server.Close()
+	logger.Trace(ctx, logger.Message("web service stopped"))
+	return err
 }
 
 func NewWebHook() *WebHook {

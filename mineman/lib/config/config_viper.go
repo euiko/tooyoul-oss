@@ -141,6 +141,6 @@ func (v *valueViper) StringMapString(def ...map[string]string) map[string]string
 	return d
 }
 
-func (v *valueViper) Scan(val ...interface{}) error {
+func (v *valueViper) Scan(val interface{}) error {
 	return v.viper.UnmarshalKey(v.key, val)
 }

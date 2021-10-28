@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/euiko/tooyoul/mineman/lib/app"
 	"github.com/euiko/tooyoul/mineman/lib/app/api"
 	"github.com/euiko/tooyoul/mineman/lib/config"
 	"github.com/euiko/tooyoul/mineman/lib/logger"
@@ -35,4 +36,12 @@ func (m *Module) helloHandler() http.Handler {
 		logger.Info(r.Context(), logger.Message("hello"))
 		w.Write([]byte("hello"))
 	})
+}
+
+func NewModule() api.Module {
+	return &Module{}
+}
+
+func init() {
+	app.RegisterModule("hello", NewModule)
 }
