@@ -54,12 +54,14 @@ func (h *chainedHook) Close(ctx context.Context) error {
 }
 
 func (h *chainedHook) Run(ctx context.Context) Waiter {
-	for _, h := range h.hooks {
-		if err := h.Run(ctx); err != nil {
-			return err
-		}
+
+	w := &chainedWaiter{
+		waiters: make([]Waiter, len(h.hooks)),
 	}
-	return nil
+	for i, h := range h.hooks {
+		w.waiters[i] = h.Run(ctx)
+	}
+	return w
 }
 
 func (h *chainedHook) ModuleLoaded(ctx context.Context, m api.Module) {
@@ -70,7 +72,7 @@ func (h *chainedHook) ModuleLoaded(ctx context.Context, m api.Module) {
 	}
 }
 
-func (h *chainedHook) ModuleInitialized(ctx context.Context, m api.Module, c config.Config) {
+func (h *chainedHook) ModuleInitialized(ctx context.Context, m api.Module) {
 	for _, h := range h.hooks {
 		if ext, ok := h.(HookModuleExt); ok {
 			ext.ModuleInitialized(ctx, m)
