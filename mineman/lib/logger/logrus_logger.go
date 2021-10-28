@@ -13,7 +13,7 @@ type LogrusLogger struct {
 }
 
 func (l *LogrusLogger) toLogrusLevel(level Level) logrus.Level {
-	return logrus.Level(l.option.Level + 1)
+	return logrus.Level(level + 1)
 }
 
 func (l *LogrusLogger) Init(ctx context.Context, c config.Config) error {

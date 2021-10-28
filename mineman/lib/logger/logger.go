@@ -99,7 +99,7 @@ func Trace(ctx context.Context, msg *MessageLog) error {
 }
 
 func log(ctx context.Context, level Level, msg *MessageLog) error {
-	l := getLogger(ctx)
+	l := FromContext(ctx)
 	if l == nil {
 		return ErrNoLogger
 	}
@@ -108,7 +108,7 @@ func log(ctx context.Context, level Level, msg *MessageLog) error {
 	return nil
 }
 
-func getLogger(ctx context.Context) Logger {
+func FromContext(ctx context.Context) Logger {
 	instance := ctx.Value(loggerContextKey)
 	if instance == nil {
 		return nil
