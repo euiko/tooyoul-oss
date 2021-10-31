@@ -7,7 +7,7 @@ import (
 
 	"github.com/euiko/tooyoul/mineman/lib/app/api"
 	"github.com/euiko/tooyoul/mineman/lib/config"
-	"github.com/euiko/tooyoul/mineman/lib/logger"
+	"github.com/euiko/tooyoul/mineman/lib/log"
 	"github.com/euiko/tooyoul/mineman/lib/runner"
 )
 
@@ -25,36 +25,35 @@ func RegisterModule(name string, factory ModuleFactory) {
 
 func (a *App) Run() error {
 	// initialize logger
-	l := logger.NewLogrusLogger()
-	ctx := logger.InjectContext(context.Background(), l)
+	l := log.NewLogrusLogger()
+	ctx := log.InjectContext(context.Background(), l)
 	ctx, cancel := context.WithCancel(ctx)
 
-	logger.Trace(ctx, logger.Message("loading config..."))
 	// load config
 	a.config = config.NewViper(a.name)
-	logger.Trace(ctx, logger.Message("config loaded"))
 
 	// load logger options
-	// l.Init(ctx, a.config)
-	// defer l.Close(ctx)
+	l.Init(ctx, a.config)
+	defer l.Close(ctx)
+	log.SetDefault(l)
 
 	runner.Run(ctx, runner.OperationFunc(func(ctx context.Context) error {
-		logger.Trace(ctx, logger.Message("running application..."))
+		log.Trace("running application...")
 		err := a.run(ctx)
 		if err != nil {
-			logger.Error(ctx, logger.Message("running app error with err=", err))
+			log.Error("running app error", log.WithError(err))
 		}
 
 		cancel()
 		return err
 	})).OnSignal(runner.SignalHandlerFunc(func(ctx context.Context, sig os.Signal) {
-		logger.Trace(ctx, logger.Message("application closed"))
+		log.Trace("application closed")
 		if sig == syscall.SIGHUP {
 			return
 		}
 
 		if err := a.hook.Close(ctx); err != nil {
-			logger.Error(ctx, logger.Message("error when closing the hook"))
+			log.Error("error when closing the hook")
 		}
 
 	})).Wait(ctx)
@@ -67,15 +66,15 @@ func (a *App) run(ctx context.Context) error {
 	moduleFactories := registry.Load()
 	modules := make([]api.Module, len(moduleFactories))
 
-	logger.Trace(ctx, logger.Message("initalizing hook..."))
+	log.Trace("initalizing hook...")
 	if err := a.hook.Init(ctx, a.config); err != nil {
 		return err
 	}
 	defer a.hook.Close(ctx)
-	logger.Trace(ctx, logger.Message("hook initialized"))
+	log.Trace("hook initialized")
 
 	// instantiate all modules
-	logger.Trace(ctx, logger.Message("loading modules..."))
+	log.Trace("loading modules...")
 	for i, f := range moduleFactories {
 		m := f()
 		if ext, ok := a.hook.(HookModuleExt); ok {
@@ -83,10 +82,10 @@ func (a *App) run(ctx context.Context) error {
 		}
 		modules[i] = m
 	}
-	logger.Trace(ctx, logger.Message("modules loaded"))
+	log.Trace("%d modules loaded", log.WithValues(len(modules)))
 
 	// calls modules init
-	logger.Trace(ctx, logger.Message("initializing modules..."))
+	log.Trace("initializing modules...")
 	for _, m := range modules {
 		if err := m.Init(ctx, a.config); err != nil {
 			return err
@@ -96,14 +95,14 @@ func (a *App) run(ctx context.Context) error {
 		}
 		defer func(m api.Module) {
 			if err := m.Close(ctx); err != nil {
-				logger.Error(ctx, logger.Message("error while closing module err=", err))
+				log.Error("error while closing module", log.WithError(err))
 			}
 		}(m)
 	}
-	logger.Trace(ctx, logger.Message("modules initialized"))
+	log.Trace("modules initialized")
 
-	logger.Trace(ctx, logger.Message("running hook"))
-	defer logger.Trace(ctx, logger.Message("hook run done"))
+	log.Trace("running hook")
+	defer log.Trace("hook run done")
 	waiter := a.hook.Run(ctx)
 	if waiter == nil {
 		return nil

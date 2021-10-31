@@ -1,4 +1,4 @@
-package logger
+package log
 
 import (
 	"context"
@@ -47,6 +47,13 @@ func (l *ChainLogger) Close(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (l *ChainLogger) SetLevel(level Level) {
+	// set all available logger level
+	for _, l := range l.loggers {
+		l.SetLevel(level)
+	}
 }
 
 func (l *ChainLogger) Log(level Level, msg *MessageLog) {

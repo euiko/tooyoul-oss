@@ -7,19 +7,19 @@ import (
 
 	"github.com/euiko/tooyoul/mineman/lib/app/api"
 	"github.com/euiko/tooyoul/mineman/lib/config"
-	"github.com/euiko/tooyoul/mineman/lib/logger"
+	"github.com/euiko/tooyoul/mineman/lib/log"
 	"github.com/julienschmidt/httprouter"
 )
 
 type (
-	WebOption struct {
+	WebConfig struct {
 		Enabled      bool          `mapstructure:"enabled"`
 		Address      string        `mapstructure:"address"`
 		WriteTimeout time.Duration `mapstructure:"write_timeout"`
 		ReadTimeout  time.Duration `mapstructure:"read_timeout"`
 	}
 	WebHook struct {
-		option    WebOption
+		option    WebConfig
 		c         config.Config
 		server    http.Server
 		errChan   chan error
@@ -29,17 +29,19 @@ type (
 )
 
 func (h *WebHook) Init(ctx context.Context, c config.Config) error {
-	h.c = c
-	logger.Debug(ctx, logger.Message(c.Get("wen.enabled").Bool()))
 
+	// load config
+	h.c = c
 	if err := h.c.Get("web").Scan(&h.option); err != nil {
 		return err
 	}
 
+	// skip if disabled
 	if !h.option.Enabled {
 		return nil
 	}
 
+	// set some server parameters
 	h.server.Addr = h.option.Address
 	h.server.ReadTimeout = h.option.ReadTimeout
 	h.server.WriteTimeout = h.option.WriteTimeout
@@ -63,25 +65,33 @@ func (h *WebHook) ModuleInitialized(ctx context.Context, m api.Module) {
 }
 
 func (h *WebHook) Run(ctx context.Context) Waiter {
+
+	// skip if disabled
 	if !h.option.Enabled {
 		return nil
 	}
 
+	// create new router
 	router := httprouter.New()
+
+	// defaultMiddlewares are absolute middleware to be used even if all the middleware skipped
 	defaultMiddlerwares := []api.Middleware{loggerInjectorMiddleware(ctx)}
 
 	for _, endpoint := range h.endpoints {
 
+		// skip all middleware
 		var skipMiddlewares bool
 		if ext, ok := endpoint.Handler.(api.SkipMiddlewaresExt); ok {
 			skipMiddlewares = ext.SkipMiddlewares()
 		}
 
+		// skip the default middleware provided by the web hook
 		var skipDefaultMiddlewares bool
 		if ext, ok := endpoint.Handler.(api.SkipDefaultMiddlewaresExt); ok {
 			skipDefaultMiddlewares = ext.SkipDefaultMiddlewares()
 		}
 
+		// effectiveMiddlewares is the actual middleware to be used by an endpoint
 		effectiveMiddlewares := defaultMiddlerwares
 
 		if !skipDefaultMiddlewares {
@@ -92,6 +102,7 @@ func (h *WebHook) Run(ctx context.Context) Waiter {
 			effectiveMiddlewares = defaultMiddlerwares
 		}
 
+		// add to the router
 		router.Handler(endpoint.Method, endpoint.Path, h.handleWithMiddlewares(endpoint.Handler, effectiveMiddlewares...))
 	}
 
@@ -111,9 +122,9 @@ func (h *WebHook) handleWithMiddlewares(handler http.Handler, mws ...api.Middlew
 }
 
 func (h *WebHook) start(ctx context.Context) {
-	logger.Trace(ctx, logger.Message("starting web service..."))
+	log.Trace("starting web service...")
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error(ctx, logger.Message("failed when listen and serve http err=", err))
+		log.Error("failed when listen and serve http", log.WithError(err))
 		h.errChan <- err
 	} else {
 		h.errChan <- nil
@@ -122,9 +133,9 @@ func (h *WebHook) start(ctx context.Context) {
 }
 
 func (h *WebHook) stop(ctx context.Context) error {
-	logger.Trace(ctx, logger.Message("stopping web service..."))
+	log.Trace("stopping web service...")
 	err := h.server.Close()
-	logger.Trace(ctx, logger.Message("web service stopped"))
+	log.Trace("web service stopped")
 	return err
 }
 
@@ -135,11 +146,11 @@ func NewWebHook() *WebHook {
 }
 
 func loggerInjectorMiddleware(ctx context.Context) api.Middleware {
-	l := logger.FromContext(ctx)
+	l := log.FromContext(ctx)
 	return api.MiddlewareFunc(func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			rCtx := r.Context()
-			injectedReq := r.WithContext(logger.InjectContext(rCtx, l))
+			injectedReq := r.WithContext(log.InjectContext(rCtx, l))
 			h.ServeHTTP(w, injectedReq)
 		})
 	})

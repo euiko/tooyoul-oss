@@ -7,7 +7,7 @@ import (
 	"github.com/euiko/tooyoul/mineman/lib/app"
 	"github.com/euiko/tooyoul/mineman/lib/app/api"
 	"github.com/euiko/tooyoul/mineman/lib/config"
-	"github.com/euiko/tooyoul/mineman/lib/logger"
+	"github.com/euiko/tooyoul/mineman/lib/log"
 )
 
 type Module struct {
@@ -33,7 +33,7 @@ func (m *Module) CreateEndpoints(mws ...api.Middleware) []api.Endpoint {
 
 func (m *Module) helloHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Info(r.Context(), logger.Message("hello"))
+		log.Info("hello")
 		w.Write([]byte("hello"))
 	})
 }
