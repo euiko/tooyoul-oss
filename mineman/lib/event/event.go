@@ -37,7 +37,7 @@ type (
 
 	Subscriber interface {
 		Subscribe(ctx context.Context, topic string) SubscriptionMsg
-		SubscribeCallback(ctx context.Context, topic string) Subscription
+		SubscribeMessage(ctx context.Context, topic string, handle MessageHandler) Subscription
 	}
 
 	Publishing interface {
@@ -45,6 +45,7 @@ type (
 	}
 
 	Subscription interface {
+		Error() error
 		Close() error
 	}
 

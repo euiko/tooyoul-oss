@@ -10,16 +10,23 @@ type (
 	command interface{}
 
 	publishCommand struct {
+		ctx     context.Context
 		topic   topicID
 		payload event.Payload
 		err     chan error
 	}
 
 	subscribeCommand struct {
+		ctx          context.Context
 		subscription chan event.SubscriptionMsg
 		id           subscriberID
 		topic        topicID
-		channel      chan event.Message
+	}
+
+	unsubscribeCommand struct {
+		id      subscriberID
+		topic   topicID
+		errChan chan error
 	}
 
 	ackMsgCommand struct {

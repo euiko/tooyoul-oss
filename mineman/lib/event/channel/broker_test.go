@@ -54,15 +54,29 @@ func TestPubSub(t *testing.T) {
 	defer broker.Close(ctx)
 
 	subscriptionA := broker.Subscribe(ctx, "hello")
-	go subscriberA(subscriptionA.Message())
+	if err := subscriptionA.Error(); err != nil {
+		t.Fatalf("subscribe A ailed err=%s", err)
+		return
+	}
 
 	subscriptionB := broker.Subscribe(ctx, "hello")
-	go subscriberB(subscriptionB.Message())
+	if err := subscriptionB.Error(); err != nil {
+		t.Fatalf("subscribe B failed err=%s", err)
+		return
+	}
 
-	broker.Publish(ctx, "hello", event.StringPayload("halo"))
-	broker.Publish(ctx, "hello", event.StringPayload("dunia"))
-	broker.Publish(ctx, "hello", event.StringPayload("apakabar"))
-	broker.Publish(ctx, "hala", event.StringPayload("halo"))
+	a := broker.Publish(ctx, "hello", event.StringPayload("halo"))
+	b := broker.Publish(ctx, "hello", event.StringPayload("dunia"))
+	c := broker.Publish(ctx, "hello", event.StringPayload("apakabar"))
+	d := broker.Publish(ctx, "hala", event.StringPayload("halo"))
+
+	<-a.Error()
+	<-b.Error()
+	<-c.Error()
+	<-d.Error()
+
+	go subscriberA(subscriptionA.Message())
+	go subscriberB(subscriptionB.Message())
 
 	<-doneA
 	<-doneB

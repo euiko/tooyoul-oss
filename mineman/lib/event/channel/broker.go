@@ -10,6 +10,7 @@ import (
 )
 
 var (
+	ErrOperationCanceled       = errors.New("operation canceled")
 	ErrPublishBufferExceeded   = errors.New("can't handle anymore publish, buffer exceeded")
 	ErrSubscribeBufferExceeded = errors.New("can't send to the subscriber, buffer exceeded")
 )
@@ -90,21 +91,35 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload event.Payloa
 }
 
 func (b *Broker) Subscribe(ctx context.Context, topic string) event.SubscriptionMsg {
-	subscriptionChan := make(chan event.SubscriptionMsg)
+	subscriptionChan := make(chan event.SubscriptionMsg, 1)
 	defer close(subscriptionChan)
 	id := subscriberID(generateID())
 
 	b.cmdBuffer <- &subscribeCommand{
+		ctx:          ctx,
 		subscription: subscriptionChan,
 		id:           id,
 		topic:        topicID(topic),
-		channel:      make(chan event.Message, b.config.SubBufferSize),
 	}
 	return <-subscriptionChan
 }
 
-func (b *Broker) SubscribeCallback(ctx context.Context, topic string) event.Subscription {
-	panic("not yet implemented")
+func (b *Broker) SubscribeMessage(ctx context.Context, topic string, handler event.MessageHandler) event.Subscription {
+	subscription := b.Subscribe(ctx, topic)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-subscription.Message():
+				handler.HandleMessage(ctx, msg)
+			default:
+				return
+			}
+		}
+	}()
+
+	return subscription
 }
 
 func (b *Broker) start(ctx context.Context) {
@@ -152,6 +167,8 @@ func (b *Broker) handleCmd(ctx context.Context, cmd command) {
 			publish.err <- ErrPublishBufferExceeded
 			defer close(publish.err)
 		}
+	case *unsubscribeCommand: // handle unsubscription first
+		b.handleUnsubscribe(ctx, cmd.(*unsubscribeCommand))
 	case *subscribeCommand:
 		b.handleSubscribe(ctx, cmd.(*subscribeCommand))
 	case *ackMsgCommand:
@@ -197,32 +214,189 @@ func (b *Broker) handlePublish(ctx context.Context, publish publishCommand) {
 	}
 }
 
-func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeCommand) {
-	// register subscriber
-	b.subs[subscribe.id] = subscribe.channel
-	// cache by topic
-	b.subsByTopic[subscribe.topic] = append(b.subsByTopic[subscribe.topic], subscribe.id)
-	// send the result
-	subscribe.subscription <- &subscriptionChan{
-		channel: subscribe.channel,
+func (b *Broker) handleUnsubscribe(ctx context.Context, unsubscribe *unsubscribeCommand) {
+	// we don't respect the global ctx, because the unsubscibe also being used for
+	// cleaning up resources when the context is done
+	// do the clean up with reverse order to the subscribe counterparts
+
+	defer close(unsubscribe.errChan)
+
+	// lookup the subscription instance
+	s := b.subs[unsubscribe.id]
+	// close the channel first
+	close(s)
+
+	// clear the cache by topic
+	subs := b.subsByTopic[unsubscribe.topic]
+	newSubs := make([]subscriberID, len(subs)-1)
+	i := 0
+	for _, sub := range subs {
+		if sub == unsubscribe.id {
+			continue
+		}
+		newSubs[i] = sub
+		i++
 	}
+	b.subsByTopic[unsubscribe.topic] = newSubs
+
+	// remove then subscription
+	delete(b.subs, unsubscribe.id)
+
+	// send the result
+	unsubscribe.errChan <- nil
+}
+
+func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeCommand) {
+	// for synchronize with the main loop
+	doneChan := make(chan struct{})
+	defer close(doneChan)
+
+	// do inside goroutine to also watch the context for cancel operation
+	go func() {
+		doChan := make(chan struct{}, 1)
+		defer close(doChan)
+		doChan <- struct{}{}
+		closed := false
+
+		for {
+			select {
+			case <-ctx.Done(): // for the global context
+
+				if !closed {
+					subscribe.subscription <- &subscriptionChan{
+						broker: b,
+						err:    ErrOperationCanceled,
+					}
+					doneChan <- struct{}{}
+				}
+				return
+			case <-subscribe.ctx.Done(): // for the local context
+				// request for unsubscription
+				b.cmdBuffer <- &unsubscribeCommand{
+					id:      subscribe.id,
+					topic:   subscribe.topic,
+					errChan: make(chan error),
+				}
+
+				if !closed {
+					subscribe.subscription <- &subscriptionChan{
+						broker: b,
+						err:    ErrOperationCanceled,
+					}
+					doneChan <- struct{}{}
+				}
+
+				return
+			case <-doChan: // only do when not canceled only
+				// make the channel
+				channel := make(chan event.Message, b.config.SubBufferSize)
+				// register subscriber
+				b.subs[subscribe.id] = channel
+				// cache by topic
+				b.subsByTopic[subscribe.topic] = append(b.subsByTopic[subscribe.topic], subscribe.id)
+				// send the result
+				subscribe.subscription <- &subscriptionChan{
+					broker:  b,
+					err:     nil,
+					id:      subscribe.id,
+					topic:   subscribe.topic,
+					channel: channel,
+				}
+				closed = true
+				doneChan <- struct{}{}
+			}
+		}
+	}()
+
+	// wait till registered
+	<-doneChan
 }
 
 func (b *Broker) handleAckMsg(ctx context.Context, cmd *ackMsgCommand) {
-	// delete from progress message
-	delete(b.progressMsg, cmd.id)
+	defer close(cmd.err)
+
+	// for synchronize with the main loop
+	doneChan := make(chan struct{})
+	defer close(doneChan)
+
+	// do inside goroutine to also watch the context for cancel operation
+	go func() {
+		doChan := make(chan struct{}, 1)
+		defer close(doChan)
+		doChan <- struct{}{}
+
+		for {
+			select {
+			case <-ctx.Done(): // for the global context
+				cmd.err <- ErrOperationCanceled
+				// close synchronization channel
+				close(doneChan)
+				return
+			case <-cmd.ctx.Done():
+				cmd.err <- ErrOperationCanceled
+				close(doneChan)
+				return
+			case <-doChan:
+				// delete from progress message
+				delete(b.progressMsg, cmd.id)
+				// send result
+				cmd.err <- nil
+			}
+		}
+	}()
+
+	<-doneChan
 }
 
 func (b *Broker) handleProgressMsg(ctx context.Context, cmd *progressMsgCommand) {
 	// noop
 	// TODO: add time limit for handle the message
+
+	defer close(cmd.err)
+
+	// send result
+	cmd.err <- nil
 }
 
 func (b *Broker) handleNackMsg(ctx context.Context, cmd *nackMsgCommand) {
-	// resubmit the message
-	msg := b.progressMsg[cmd.id]
-	c := b.subs[cmd.subscriberID]
-	c <- msg
+	defer close(cmd.err)
+
+	defer close(cmd.err)
+
+	// for synchronize with the main loop
+	doneChan := make(chan struct{})
+	defer close(doneChan)
+
+	// do inside goroutine to also watch the context for cancel operation
+	go func() {
+		doChan := make(chan struct{}, 1)
+		defer close(doChan)
+		doChan <- struct{}{}
+
+		for {
+			select {
+			case <-ctx.Done(): // for the global context
+				cmd.err <- ErrOperationCanceled
+				// close synchronization channel
+				close(doneChan)
+				return
+			case <-cmd.ctx.Done():
+				cmd.err <- ErrOperationCanceled
+				close(doneChan)
+				return
+			case <-doChan:
+				// resubmit the message
+				msg := b.progressMsg[cmd.id]
+				c := b.subs[cmd.subscriberID]
+				c <- msg
+
+				// send result
+				cmd.err <- nil
+			}
+		}
+	}()
+
+	<-doneChan
 }
 
 func New() *Broker {
