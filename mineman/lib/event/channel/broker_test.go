@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/euiko/tooyoul/mineman/lib/event"
 	"github.com/euiko/tooyoul/mineman/lib/log"
@@ -20,32 +21,35 @@ func TestPubSub(t *testing.T) {
 	defer close(doneB)
 	resultB := []string{}
 
-	subscriberA := func(channel <-chan event.Message) {
+	subscriberA := func(sub event.SubscriptionMsg) {
+		defer func() { doneA <- struct{}{} }()
 		for {
 			select {
-			case msg := <-channel:
+			case <-sub.Done():
+				return
+			case msg := <-sub.Message():
 				var payload string
 				msg.Scan(&payload)
 				resultA = append(resultA, payload)
 				msg.Ack(ctx)
-			default:
-				doneA <- struct{}{}
-				return
 			}
 		}
 	}
 
-	subscriberB := func(channel <-chan event.Message) {
+	subscriberB := func(sub event.SubscriptionMsg) {
+		defer func() { doneB <- struct{}{} }()
 		for {
 			select {
-			case msg := <-channel:
+			case <-sub.Done():
+				return
+			case msg := <-sub.Message():
+				if msg == nil {
+					return
+				}
 				var payload string
 				msg.Scan(&payload)
 				resultB = append(resultB, payload)
 				msg.Ack(ctx)
-			default:
-				doneB <- struct{}{}
-				return
 			}
 		}
 	}
@@ -54,29 +58,22 @@ func TestPubSub(t *testing.T) {
 	defer broker.Close(ctx)
 
 	subscriptionA := broker.Subscribe(ctx, "hello")
-	if err := subscriptionA.Error(); err != nil {
-		t.Fatalf("subscribe A ailed err=%s", err)
-		return
-	}
-
 	subscriptionB := broker.Subscribe(ctx, "hello")
-	if err := subscriptionB.Error(); err != nil {
-		t.Fatalf("subscribe B failed err=%s", err)
-		return
-	}
 
-	a := broker.Publish(ctx, "hello", event.StringPayload("halo"))
-	b := broker.Publish(ctx, "hello", event.StringPayload("dunia"))
-	c := broker.Publish(ctx, "hello", event.StringPayload("apakabar"))
-	d := broker.Publish(ctx, "hala", event.StringPayload("halo"))
+	broker.Publish(ctx, "hello", event.StringPayload("halo"))
+	broker.Publish(ctx, "hello", event.StringPayload("dunia"))
+	broker.Publish(ctx, "hello", event.StringPayload("apakabar"))
+	broker.Publish(ctx, "hala", event.StringPayload("halo"))
 
-	<-a.Error()
-	<-b.Error()
-	<-c.Error()
-	<-d.Error()
+	go subscriberA(subscriptionA)
+	go subscriberB(subscriptionB)
 
-	go subscriberA(subscriptionA.Message())
-	go subscriberB(subscriptionB.Message())
+	// close the subscription after 200 milli
+	go func() {
+		<-time.After(time.Millisecond * 50)
+		subscriptionA.Close()
+		subscriptionB.Close()
+	}()
 
 	<-doneA
 	<-doneB

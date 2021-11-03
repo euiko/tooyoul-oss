@@ -27,6 +27,7 @@ type (
 		id      subscriberID
 		topic   topicID
 		errChan chan error
+		cancel  func()
 	}
 
 	ackMsgCommand struct {

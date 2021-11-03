@@ -111,10 +111,10 @@ func (b *Broker) SubscribeMessage(ctx context.Context, topic string, handler eve
 			select {
 			case <-ctx.Done():
 				return
+			case <-subscription.Done():
+				return
 			case msg := <-subscription.Message():
 				handler.HandleMessage(ctx, msg)
-			default:
-				return
 			}
 		}
 	}()
@@ -223,7 +223,13 @@ func (b *Broker) handleUnsubscribe(ctx context.Context, unsubscribe *unsubscribe
 
 	// lookup the subscription instance
 	s := b.subs[unsubscribe.id]
-	// close the channel first
+
+	// cancel the context
+	if unsubscribe.cancel != nil {
+		unsubscribe.cancel()
+	}
+
+	// close the channel
 	close(s)
 
 	// clear the cache by topic
@@ -239,7 +245,7 @@ func (b *Broker) handleUnsubscribe(ctx context.Context, unsubscribe *unsubscribe
 	}
 	b.subsByTopic[unsubscribe.topic] = newSubs
 
-	// remove then subscription
+	// remove the subscription
 	delete(b.subs, unsubscribe.id)
 
 	// send the result
@@ -263,10 +269,7 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 			case <-ctx.Done(): // for the global context
 
 				if !closed {
-					subscribe.subscription <- &subscriptionChan{
-						broker: b,
-						err:    ErrOperationCanceled,
-					}
+					subscribe.subscription <- newSubscriptionChan(b, ErrOperationCanceled)
 					doneChan <- struct{}{}
 				}
 				return
@@ -279,11 +282,7 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 				}
 
 				if !closed {
-					subscribe.subscription <- &subscriptionChan{
-						broker: b,
-						err:    ErrOperationCanceled,
-					}
-					doneChan <- struct{}{}
+					subscribe.subscription <- newSubscriptionChan(b, ErrOperationCanceled)
 				}
 
 				return
@@ -295,13 +294,15 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 				// cache by topic
 				b.subsByTopic[subscribe.topic] = append(b.subsByTopic[subscribe.topic], subscribe.id)
 				// send the result
-				subscribe.subscription <- &subscriptionChan{
-					broker:  b,
-					err:     nil,
-					id:      subscribe.id,
-					topic:   subscribe.topic,
-					channel: channel,
-				}
+				subscribe.subscription <- newSubscriptionChanWithChannel(
+					b,
+					nil,
+					subscribe.topic,
+					subscribe.id,
+					channel,
+				)
+
+				// flag that the channel already closed
 				closed = true
 				doneChan <- struct{}{}
 			}

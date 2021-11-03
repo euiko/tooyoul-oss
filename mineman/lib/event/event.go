@@ -51,6 +51,7 @@ type (
 
 	SubscriptionMsg interface {
 		Subscription
+		Done() <-chan struct{}
 		Message() <-chan Message
 	}
 )

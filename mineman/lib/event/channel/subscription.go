@@ -1,6 +1,8 @@
 package channel
 
 import (
+	"context"
+
 	"github.com/euiko/tooyoul/mineman/lib/event"
 )
 
@@ -11,17 +13,25 @@ type (
 		topic   topicID
 		err     error
 		channel chan event.Message
+
+		// to hold cancelation with ease
+		ctx    context.Context
+		cancel func()
 	}
 )
 
+func (s *subscriptionChan) Done() <-chan struct{} {
+	return s.ctx.Done()
+}
+
 func (s *subscriptionChan) Close() error {
 	errChan := make(chan error)
-	defer close(errChan)
 
 	s.broker.cmdBuffer <- &unsubscribeCommand{
 		id:      s.id,
 		topic:   s.topic,
 		errChan: errChan,
+		cancel:  s.cancel,
 	}
 
 	return <-errChan
@@ -33,4 +43,26 @@ func (s *subscriptionChan) Message() <-chan event.Message {
 
 func (s *subscriptionChan) Error() error {
 	return s.err
+}
+
+func newSubscriptionChan(b *Broker, err error) *subscriptionChan {
+	return newSubscriptionChanWithChannel(b, err, "", "", nil)
+}
+
+func newSubscriptionChanWithChannel(
+	b *Broker, err error,
+	topic topicID,
+	subID subscriberID,
+	channel chan event.Message,
+) *subscriptionChan {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &subscriptionChan{
+		ctx:     ctx,
+		cancel:  cancel,
+		broker:  b,
+		err:     err,
+		topic:   topic,
+		id:      subID,
+		channel: channel,
+	}
 }
