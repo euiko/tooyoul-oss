@@ -164,6 +164,11 @@ func newMessageOption(message string, options ...OptionFunc) Option {
 }
 
 func log(level Level, msg string, opts ...OptionFunc) error {
+	// global logger not yet specified, then do nothing
+	if globalLogger == nil {
+		return nil
+	}
+
 	opt := newMessageOption(msg, opts...)
 	logger := opt.logger
 
