@@ -9,7 +9,7 @@ import (
 )
 
 type (
-	ConfigViper struct {
+	Viper struct {
 		viper *viper.Viper
 	}
 
@@ -19,28 +19,39 @@ type (
 	}
 )
 
-func (c *ConfigViper) Get(path string) Value {
+func (c *Viper) Sub(path string) Config {
+	return &Viper{
+		viper: c.viper.Sub(path),
+	}
+}
+
+func (c *Viper) Get(path string) Value {
 	return &valueViper{key: path, viper: c.viper}
 }
 
-func (c *ConfigViper) Set(path string, val interface{}) error {
+func (c *Viper) Set(path string, val interface{}) error {
 	c.viper.Set(path, val)
 	return nil
 }
 
-func (c *ConfigViper) Write() error {
+func (c *Viper) Write() error {
 	return c.viper.WriteConfig()
 }
 
-func (c *ConfigViper) OnChange(callback OnChangedFunc) {
+func (c *Viper) OnChange(callback OnChangedFunc) {
 	c.viper.OnConfigChange(func(in fsnotify.Event) {
 		callback()
 	})
 }
 
-func NewConfigViper(path string) *ConfigViper {
+func NewViper(path string) *Viper {
 	v := viper.New()
-	return &ConfigViper{
+	v.SetConfigName(path)
+	v.AddConfigPath(".")
+	if err := v.ReadInConfig(); err != nil {
+		panic(err)
+	}
+	return &Viper{
 		viper: v,
 	}
 }
@@ -136,6 +147,6 @@ func (v *valueViper) StringMapString(def ...map[string]string) map[string]string
 	return d
 }
 
-func (v *valueViper) Scan(val ...interface{}) error {
-	return v.viper.UnmarshalKey(v.key, v.viper.Get(v.key))
+func (v *valueViper) Scan(val interface{}) error {
+	return v.viper.UnmarshalKey(v.key, val)
 }

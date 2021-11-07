@@ -1,0 +1,47 @@
+package hello
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/euiko/tooyoul/mineman/lib/app"
+	"github.com/euiko/tooyoul/mineman/lib/app/api"
+	"github.com/euiko/tooyoul/mineman/lib/config"
+	"github.com/euiko/tooyoul/mineman/lib/log"
+)
+
+type Module struct {
+}
+
+func (m *Module) Init(ctx context.Context, c config.Config) error {
+	return nil
+}
+
+func (m *Module) Close(ctx context.Context) error {
+	return nil
+}
+
+func (m *Module) CreateEndpoints(mws ...api.Middleware) []api.Endpoint {
+	return []api.Endpoint{
+		{
+			Method:  "GET",
+			Path:    "/hello",
+			Handler: m.helloHandler(),
+		},
+	}
+}
+
+func (m *Module) helloHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Info("hello")
+		w.Write([]byte("hello"))
+	})
+}
+
+func NewModule() api.Module {
+	return &Module{}
+}
+
+func init() {
+	app.RegisterModule("hello", NewModule)
+}

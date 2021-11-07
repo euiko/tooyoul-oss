@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/euiko/tooyoul/mineman/lib/logger"
+	"github.com/euiko/tooyoul/mineman/lib/log"
 )
 
 const Stop = time.Duration(-1)
@@ -74,7 +74,6 @@ func run(ctx context.Context, operation Operation, strategy RetryStrategy) {
 		case <-newCtx.Done():
 			return
 		case <-time.After(next):
-			break
 		}
 
 	}
@@ -83,7 +82,7 @@ func run(ctx context.Context, operation Operation, strategy RetryStrategy) {
 func doOperation(ctx context.Context, operation Operation) error {
 	defer func() {
 		if err := recover(); err != nil {
-			logger.Error(ctx, logger.MessageFmt("panic recovered in doOperation with error=%s", err))
+			log.Error("panic recovered in doOperation", log.WithField("err", err))
 		}
 	}()
 
