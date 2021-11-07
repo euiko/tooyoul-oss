@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/euiko/tooyoul/mineman/lib/app/api"
 	"github.com/euiko/tooyoul/mineman/lib/config"
 	"github.com/euiko/tooyoul/mineman/lib/event"
 	"github.com/euiko/tooyoul/mineman/lib/log"
@@ -39,10 +40,6 @@ type (
 		subs        map[subscriberID]chan event.Message
 	}
 
-	publishing struct {
-		channel <-chan error
-	}
-
 	// some alias to help for easier reading
 	messageID    string
 	subscriberID string
@@ -51,7 +48,7 @@ type (
 
 func (b *Broker) Init(ctx context.Context, c config.Config) error {
 	log.Trace("loading event channel config...")
-	if err := c.Get("event.channel").Scan(&b.config); err != nil {
+	if err := c.Get("channel").Scan(&b.config); err != nil {
 		return err
 	}
 
@@ -85,9 +82,7 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload event.Payloa
 		payload: payload,
 		err:     errChan,
 	}
-	return &publishing{
-		channel: errChan,
-	}
+	return event.NewPublishingChanForward(errChan)
 }
 
 func (b *Broker) Subscribe(ctx context.Context, topic string) event.SubscriptionMsg {
@@ -104,7 +99,7 @@ func (b *Broker) Subscribe(ctx context.Context, topic string) event.Subscription
 	return <-subscriptionChan
 }
 
-func (b *Broker) SubscribeMessage(ctx context.Context, topic string, handler event.MessageHandler) event.Subscription {
+func (b *Broker) SubscribeHandler(ctx context.Context, topic string, handler event.MessageHandler) event.Subscription {
 	subscription := b.Subscribe(ctx, topic)
 	go func() {
 		for {
@@ -411,6 +406,18 @@ func New() *Broker {
 	}
 }
 
-func (p *publishing) Error() <-chan error {
-	return p.channel
+// newEventBroker return the event's Broker interface, to help
+// static check whether our implementation comply with the interface
+func newEventBroker() event.Broker {
+	return New()
+}
+
+func newModule() api.Module {
+	return newEventBroker()
+}
+
+func init() {
+	event.RegisterBroker("channel", newModule)
+	// also set as default broker
+	event.RegisterBroker("", newModule)
 }

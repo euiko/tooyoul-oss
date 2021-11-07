@@ -7,6 +7,8 @@ import (
 	"github.com/euiko/tooyoul/mineman/lib/app/api"
 )
 
+var ErrNoModuleRegistered = errors.New("couldn't find appropriate module")
+
 type ModuleFactory func() api.Module
 
 type ModuleRegistry struct {
@@ -29,7 +31,7 @@ func (r *ModuleRegistry) IsRegistered(name string) bool {
 func (r *ModuleRegistry) Get(name string) (ModuleFactory, error) {
 	value, ok := r.registries.Load(name)
 	if !ok {
-		return nil, errors.New("couldn't find appropriate module")
+		return nil, ErrNoModuleRegistered
 	}
 
 	return value.(ModuleFactory), nil
@@ -40,8 +42,18 @@ func (r *ModuleRegistry) Load() []ModuleFactory {
 
 	r.registries.Range(func(key, value interface{}) bool {
 		factories = append(factories, value.(ModuleFactory))
-		return false
+		return true
 	})
 
 	return factories
+}
+
+func (r *ModuleRegistry) LoadMap() map[string]ModuleFactory {
+	factoriesMap := make(map[string]ModuleFactory)
+
+	r.registries.Range(func(key, value interface{}) bool {
+		factoriesMap[key.(string)] = value.(ModuleFactory)
+		return true
+	})
+	return factoriesMap
 }

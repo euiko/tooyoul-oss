@@ -19,6 +19,12 @@ type (
 	}
 )
 
+func (c *Viper) Sub(path string) Config {
+	return &Viper{
+		viper: c.viper.Sub(path),
+	}
+}
+
 func (c *Viper) Get(path string) Value {
 	return &valueViper{key: path, viper: c.viper}
 }

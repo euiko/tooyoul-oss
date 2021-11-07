@@ -1,5 +1,7 @@
+logger:
+  level: 6
 web:
   enabled: true
   address: :8080
-logger:
-  level: 6
+event:
+  enabled: true

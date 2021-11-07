@@ -30,6 +30,7 @@ type chainedWaiter struct {
 }
 
 type ChanWaiter struct {
+	manage  bool
 	channel chan error
 }
 
@@ -118,11 +119,24 @@ func (w *chainedWaiter) Wait() <-chan error {
 }
 
 func (w *ChanWaiter) Wait() <-chan error {
+	if w.manage {
+		close(w.channel)
+	}
 	return w.channel
 }
 
 func NewChanWaiter(channel chan error) *ChanWaiter {
 	return &ChanWaiter{
 		channel: channel,
+		manage:  false,
+	}
+}
+
+func NewDirectWaiter(initial error) *ChanWaiter {
+	errChan := make(chan error)
+	errChan <- initial
+	return &ChanWaiter{
+		channel: errChan,
+		manage:  true,
 	}
 }

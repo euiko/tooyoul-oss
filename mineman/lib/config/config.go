@@ -20,6 +20,7 @@ type (
 	OnChangedFunc func()
 
 	Config interface {
+		Sub(path string) Config
 		Get(path string) Value
 		Set(path string, val interface{}) error
 		Write() error

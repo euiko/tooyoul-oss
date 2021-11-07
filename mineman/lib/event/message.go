@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/mitchellh/mapstructure"
 )
 
 var (
@@ -63,5 +65,21 @@ func (p *EventPayload) Scan(v interface{}) error {
 		return ErrScanEventInvalidType
 	}
 
-	return errors.New("not yet implemented")
+	// add any event data with x prefix
+	data := map[string]interface{}{
+		"x-name": p.Name,
+		"x-at":   p.At,
+	}
+
+	// add meta data with x-meta prefix
+	for k, v := range p.Meta {
+		data["x-meta-"+k] = v
+	}
+
+	// add data payload
+	for k, v := range p.Data {
+		data[k] = v
+	}
+
+	return mapstructure.Decode(data, v)
 }
