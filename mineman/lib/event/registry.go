@@ -1,6 +1,8 @@
 package event
 
-import "github.com/euiko/tooyoul/mineman/lib/app"
+import (
+	"github.com/euiko/tooyoul/mineman/lib/app"
+)
 
 var moduleRegistry app.ModuleRegistry
 

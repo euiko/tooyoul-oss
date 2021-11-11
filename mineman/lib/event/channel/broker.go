@@ -12,6 +12,7 @@ import (
 
 var (
 	ErrOperationCanceled       = errors.New("operation canceled")
+	ErrAlreadyClosed           = errors.New("subscription already closed")
 	ErrPublishBufferExceeded   = errors.New("can't handle anymore publish, buffer exceeded")
 	ErrSubscribeBufferExceeded = errors.New("can't send to the subscriber, buffer exceeded")
 )
@@ -81,6 +82,7 @@ func (b *Broker) Publish(ctx context.Context, topic string, payload event.Payloa
 		topic:   topicID(topic),
 		payload: payload,
 		err:     errChan,
+		ctx:     ctx,
 	}
 	return event.NewPublishingChanForward(errChan)
 }
@@ -96,7 +98,19 @@ func (b *Broker) Subscribe(ctx context.Context, topic string) event.Subscription
 		id:           id,
 		topic:        topicID(topic),
 	}
-	return <-subscriptionChan
+
+	subscription := <-subscriptionChan
+
+	// watch subscription cancelation to close the channel
+	go func() {
+		select {
+		case <-subscription.Done():
+			subscription.Close()
+			return
+		}
+	}()
+
+	return subscription
 }
 
 func (b *Broker) SubscribeHandler(ctx context.Context, topic string, handler event.MessageHandler) event.Subscription {
@@ -109,6 +123,10 @@ func (b *Broker) SubscribeHandler(ctx context.Context, topic string, handler eve
 			case <-subscription.Done():
 				return
 			case msg := <-subscription.Message():
+				// msg nil due to closed chan, skip the loop
+				if msg == nil {
+					continue
+				}
 				handler.HandleMessage(ctx, msg)
 			}
 		}
@@ -177,8 +195,18 @@ func (b *Broker) handleCmd(ctx context.Context, cmd command) {
 }
 
 func (b *Broker) handlePublish(ctx context.Context, publish publishCommand) {
-	subs := b.subsByTopic[publish.topic]
+
+	// check for a valid publish command
+	if publish.err == nil {
+		return
+	}
+
 	defer close(publish.err)
+	// also check subscriber presence, skip all the logic if not present
+	subs, ok := b.subsByTopic[publish.topic]
+	if !ok {
+		return
+	}
 
 	// peek all the subs not exceed buffer size
 	// expect all operation must success
@@ -214,10 +242,14 @@ func (b *Broker) handleUnsubscribe(ctx context.Context, unsubscribe *unsubscribe
 	// cleaning up resources when the context is done
 	// do the clean up with reverse order to the subscribe counterparts
 
-	defer close(unsubscribe.errChan)
-
 	// lookup the subscription instance
-	s := b.subs[unsubscribe.id]
+	s, ok := b.subs[unsubscribe.id]
+	if !ok {
+		unsubscribe.errChan <- ErrAlreadyClosed
+		return
+	}
+
+	defer close(unsubscribe.errChan)
 
 	// cancel the context
 	if unsubscribe.cancel != nil {
@@ -268,19 +300,6 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 					doneChan <- struct{}{}
 				}
 				return
-			case <-subscribe.ctx.Done(): // for the local context
-				// request for unsubscription
-				b.cmdBuffer <- &unsubscribeCommand{
-					id:      subscribe.id,
-					topic:   subscribe.topic,
-					errChan: make(chan error),
-				}
-
-				if !closed {
-					subscribe.subscription <- newSubscriptionChan(b, ErrOperationCanceled)
-				}
-
-				return
 			case <-doChan: // only do when not canceled only
 				// make the channel
 				channel := make(chan event.Message, b.config.SubBufferSize)
@@ -290,6 +309,7 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 				b.subsByTopic[subscribe.topic] = append(b.subsByTopic[subscribe.topic], subscribe.id)
 				// send the result
 				subscribe.subscription <- newSubscriptionChanWithChannel(
+					subscribe.ctx,
 					b,
 					nil,
 					subscribe.topic,

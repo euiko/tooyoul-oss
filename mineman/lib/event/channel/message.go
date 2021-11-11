@@ -15,8 +15,8 @@ type (
 	}
 )
 
-func (m *message) Scan(v interface{}) error {
-	return m.payload.Scan(v)
+func (m *message) Scan(v interface{}, opts ...event.ScanOption) error {
+	return m.payload.Scan(v, opts...)
 }
 
 func (m *message) ID() string {

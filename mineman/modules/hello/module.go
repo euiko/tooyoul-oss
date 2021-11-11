@@ -7,13 +7,29 @@ import (
 	"github.com/euiko/tooyoul/mineman/lib/app"
 	"github.com/euiko/tooyoul/mineman/lib/app/api"
 	"github.com/euiko/tooyoul/mineman/lib/config"
+	"github.com/euiko/tooyoul/mineman/lib/event"
 	"github.com/euiko/tooyoul/mineman/lib/log"
+	"github.com/euiko/tooyoul/mineman/lib/network"
 )
 
 type Module struct {
 }
 
 func (m *Module) Init(ctx context.Context, c config.Config) error {
+	event.Subscribe(ctx, network.EventStatusChangedTopic, event.MessageHandlerFunc(func(ctx context.Context, message event.Message) {
+		var (
+			downEvent network.EventNetworkDown
+			upEvent   network.EventNetworkDown
+		)
+
+		if err := message.Scan(&downEvent); err == nil {
+			log.Info("network is down", log.WithField("time", downEvent.At))
+		} else if err := message.Scan(&upEvent); err == nil {
+			log.Info("network is up", log.WithField("time", upEvent.At))
+		}
+
+		message.Ack(ctx)
+	}))
 	return nil
 }
 

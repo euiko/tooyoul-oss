@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrScanEventInvalidType  = errors.New("invalid type for scan event payload, only accept event descriptor")
+	ErrScanEventNameNotMatch = errors.New("invalid event name for scan event payload, only can marshal with matched name")
 	ErrScanStringInvalidType = errors.New("invalid type for scan string payload, only accept string ptr")
 )
 
@@ -26,8 +27,18 @@ type (
 		Nack(context.Context) <-chan error
 	}
 
+	scanOption struct {
+		strict bool
+	}
+
+	ScanOption interface {
+		ConfigureScan(o *scanOption)
+	}
+
+	ScanOptionFunc func(o *scanOption)
+
 	Payload interface {
-		Scan(v interface{}) error
+		Scan(v interface{}, opts ...ScanOption) error
 	}
 
 	StringPayload string
@@ -44,11 +55,18 @@ type (
 		Meta map[string]interface{}
 	}
 
-	EventDescriptor interface{}
+	EventDescriptor interface {
+		Name() string
+		ToEvent() *EventPayload
+	}
 )
 
+func (f ScanOptionFunc) ConfigureScan(o *scanOption) {
+	f(o)
+}
+
 // Scan on event payload means unmarshal an event to appropriate event descriptor
-func (p StringPayload) Scan(v interface{}) error {
+func (p StringPayload) Scan(v interface{}, opts ...ScanOption) error {
 	str, ok := v.(*string)
 	if !ok {
 		return ErrScanStringInvalidType
@@ -59,10 +77,17 @@ func (p StringPayload) Scan(v interface{}) error {
 }
 
 // Scan on event payload means unmarshal an event to appropriate event descriptor
-func (p *EventPayload) Scan(v interface{}) error {
-	_, ok := v.(EventDescriptor)
+func (p *EventPayload) Scan(v interface{}, opts ...ScanOption) error {
+	opt := loadScanOption(opts...)
+
+	ed, ok := v.(EventDescriptor)
 	if !ok {
 		return ErrScanEventInvalidType
+	}
+
+	// compare the event name with the descriptor, when strict mode
+	if opt.strict && ed.Name() != p.Name {
+		return ErrScanEventNameNotMatch
 	}
 
 	// add any event data with x prefix
@@ -82,4 +107,26 @@ func (p *EventPayload) Scan(v interface{}) error {
 	}
 
 	return mapstructure.Decode(data, v)
+}
+
+func ScanStrictMode(strictMode bool) ScanOption {
+	return ScanOptionFunc(func(o *scanOption) {
+		o.strict = strictMode
+	})
+}
+
+func FromEventDescriptor(ed EventDescriptor) Payload {
+	return ed.ToEvent()
+}
+
+func loadScanOption(opts ...ScanOption) *scanOption {
+	o := scanOption{
+		strict: true,
+	}
+
+	for _, f := range opts {
+		f.ConfigureScan(&o)
+	}
+
+	return &o
 }

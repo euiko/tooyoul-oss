@@ -106,7 +106,7 @@ func (s *subscriptionDirect) Close() error {
 }
 
 func (s *subscriptionDirect) Message() <-chan Message {
-	return s.Message()
+	return s.messageChan
 }
 
 func (s *subscriptionDirect) Done() <-chan struct{} {

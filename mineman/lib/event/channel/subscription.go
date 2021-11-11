@@ -46,16 +46,18 @@ func (s *subscriptionChan) Error() error {
 }
 
 func newSubscriptionChan(b *Broker, err error) *subscriptionChan {
-	return newSubscriptionChanWithChannel(b, err, "", "", nil)
+	return newSubscriptionChanWithChannel(context.Background(), b, err, "", "", nil)
 }
 
 func newSubscriptionChanWithChannel(
-	b *Broker, err error,
+	ctx context.Context,
+	b *Broker,
+	err error,
 	topic topicID,
 	subID subscriberID,
 	channel chan event.Message,
 ) *subscriptionChan {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	return &subscriptionChan{
 		ctx:     ctx,
 		cancel:  cancel,

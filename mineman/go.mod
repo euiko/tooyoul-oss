@@ -3,6 +3,7 @@ module github.com/euiko/tooyoul/mineman
 go 1.16
 
 require (
+	github.com/cenkalti/backoff/v4 v4.1.1
 	github.com/fsnotify/fsnotify v1.5.1
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/mitchellh/mapstructure v1.4.2
