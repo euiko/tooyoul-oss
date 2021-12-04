@@ -4,12 +4,12 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/euiko/tooyoul/mineman/lib/app"
-	"github.com/euiko/tooyoul/mineman/lib/app/api"
-	"github.com/euiko/tooyoul/mineman/lib/config"
-	"github.com/euiko/tooyoul/mineman/lib/event"
-	"github.com/euiko/tooyoul/mineman/lib/log"
-	"github.com/euiko/tooyoul/mineman/lib/network"
+	"github.com/euiko/tooyoul/mineman/pkg/app"
+	"github.com/euiko/tooyoul/mineman/pkg/app/api"
+	"github.com/euiko/tooyoul/mineman/pkg/config"
+	"github.com/euiko/tooyoul/mineman/pkg/event"
+	"github.com/euiko/tooyoul/mineman/pkg/log"
+	"github.com/euiko/tooyoul/mineman/pkg/network"
 )
 
 type Module struct {
