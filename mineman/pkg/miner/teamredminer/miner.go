@@ -1,8 +1,6 @@
 package teamredminer
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -155,10 +153,6 @@ func (m *Miner) Select(query *miner.DeviceQuery, target interface{}) (miner.Devi
 
 	log.Debug("start looking up for selected device with query=%s", log.WithValues(query.String()))
 	cmd := m.option.Executor.Execute(context.Background(), execName, []string{"--list_devices"})
-	if err := cmd.Run(); err != nil {
-		log.Debug("error occurred when running teamredminer list_devices", log.WithError(err))
-		return nil, err
-	}
 
 	b, err := cmd.Output()
 	if err != nil {
@@ -167,33 +161,12 @@ func (m *Miner) Select(query *miner.DeviceQuery, target interface{}) (miner.Devi
 	}
 
 	// scan through the result
-	rd := bytes.NewReader(b)
-	scanner := bufio.NewScanner(rd)
-	counter := 0 // internal counter
-	gpuTexts := []string{}
-	for scanner.Scan() {
-		counter++
-		// skip these first result
-		if counter <= skipResult {
-			continue
-		}
-
-		// cut the time output
-		text := scanner.Text()
-		text = text[0:22]
-
-		gpuTexts = append(gpuTexts, text)
-	}
-
-	// cut off the last line
-	gpuTexts = gpuTexts[0 : len(gpuTexts)-1]
-
 	log.Debug("parsing gpu texts")
-	gpus, err := parseDevices(gpuTexts)
+	gpus, err := parseDevices(b)
 	if err != nil {
 		return nil, err
 	}
-	log.Debug("found %d gpus", log.WithValues(len(gpuTexts)))
+	log.Debug("found %d gpus", log.WithValues(len(gpus)))
 
 	for _, gpu := range gpus {
 		if query == nil {
@@ -284,7 +257,7 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 
 	log.Debug("piping std in/out and start command")
 	m.stdIn, err = execCmd.StdinPipe()
-	m.stdOut, err = execCmd.StdoutPipe()
+	m.stdOut, err = execCmd.StderrPipe()
 	if err := execCmd.Start(); err != nil {
 		cancelStart(false)
 		return err

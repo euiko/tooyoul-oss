@@ -1,10 +1,14 @@
 package teamredminer
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/euiko/tooyoul/mineman/pkg/log"
 )
@@ -30,10 +34,14 @@ type (
 	}
 )
 
-var parseDeviceRegex = regexp.MustCompile("\\t+")
+var (
+	splitDeviceRegex     = regexp.MustCompile("(\\s{2,}|\\s{1,}\\d{2}:)")
+	parseBusIdFirstRegex = regexp.MustCompile("\\d+\\s+\\d+\\s+\\d+\\s+")
+	parseBusIdLastRegex  = regexp.MustCompile("\\s+.*")
+)
 
 func (d *device) Next() bool {
-	if d.index >= len(d.devices) {
+	if d.index >= len(d.devices)-1 {
 		return false
 	}
 
@@ -131,35 +139,69 @@ func newDevice(devices []gpuDevice) *device {
 	}
 }
 
-func parseDevices(gpuTexts []string) ([]gpuDevice, error) {
+func readDevicesText(rd io.Reader) []string {
+	scanner := bufio.NewScanner(rd)
+	counter := 0 // internal counter
+	gpuTexts := []string{}
+	for scanner.Scan() {
+		counter++
+		// skip these first result
+		if counter <= skipResult {
+			continue
+		}
+
+		// cut the time output
+		text := scanner.Text()
+		text = strings.TrimSpace(text[22:])
+
+		gpuTexts = append(gpuTexts, text)
+	}
+
+	// cut off the last line
+	gpuTexts = gpuTexts[0 : len(gpuTexts)-1]
+
+	return gpuTexts
+}
+
+func parseDevices(raw []byte) ([]gpuDevice, error) {
 	var err error
+
+	rd := bytes.NewReader(raw)
+	gpuTexts := readDevicesText(rd)
+
 	gpus := make([]gpuDevice, len(gpuTexts))
 	for i, t := range gpuTexts {
-		cols := parseDeviceRegex.Split(t, -1)
+		cols := splitDeviceRegex.Split(t, -1)
 		if len(cols) != 7 {
-			log.Debug("invalid column count after parse, expect 7, got %d", log.WithValues(len(cols)))
+			log.Error("invalid column count after parse, expect 7, got %d with values=%v", log.WithValues(len(cols), cols))
 			continue
 		}
 
 		gpus[i].index, err = strconv.Atoi(cols[0])
 		if err != nil {
-			log.Debug("parse device index failed", log.WithError(err))
+			log.Error("parse device index failed error=%s, text=%s", log.WithValues(err, cols[0]))
 			continue
 		}
 
 		gpus[i].platform, err = strconv.Atoi(cols[1])
 		if err != nil {
-			log.Debug("parse device platform failed", log.WithError(err))
+			log.Error("parse device platform failed", log.WithError(err))
 			continue
 		}
 
 		gpus[i].opencl, err = strconv.Atoi(cols[2])
 		if err != nil {
-			log.Debug("parse device opencl failed", log.WithError(err))
+			log.Error("parse device opencl failed", log.WithError(err))
 			continue
 		}
 
-		gpus[i].busId = cols[3]
+		// lookup again for busId because it is trimmed when spliting using regex
+		// first regex will result "01:00.0 XXX XXX XXXX etc"
+		// second regex will cut all the text after that, resulting only "01:00.0"
+		busId := parseBusIdFirstRegex.ReplaceAllString(t, "")
+		busId = parseBusIdLastRegex.ReplaceAllString(busId, "")
+		gpus[i].busId = busId
+
 		gpus[i].name = cols[4]
 		gpus[i].model = cols[5]
 
