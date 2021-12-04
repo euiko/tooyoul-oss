@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/euiko/tooyoul/mineman/pkg/config"
@@ -43,6 +44,14 @@ func main() {
 }
 
 func run(cmd *cobra.Command, args []string) error {
+
+	if url == "" {
+		return errors.New("url must be specified")
+	} else if user == "" {
+		return errors.New("users must be specified")
+	} else if algorithm == "" {
+		return errors.New("algorithm must be specified")
+	}
 
 	// set debug level when enabled
 	if debug {
