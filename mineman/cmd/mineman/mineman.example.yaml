@@ -1,0 +1,18 @@
+logger:
+  level: 6
+web:
+  enabled: true
+  address: :8080
+event:
+  enabled: true
+miner:
+  pools:
+    kharis:
+      url: stratum+tcp://raven.f2pool.com:3636
+      user: euiko
+      pass: x
+      algorithm: kawpow
+  miners:
+    - miner: teamredminer
+      pool: kharis
+      device: index:1

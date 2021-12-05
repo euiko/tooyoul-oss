@@ -75,16 +75,17 @@ func load(ctx context.Context, cmd *cobra.Command, args []string) (*teamredminer
 		log.SetLevel(log.DebugLevel)
 	}
 	config := config.NewViper("trminer", config.ViperStandalone())
-	config.Set("url", url)
-	config.Set("user", user)
-	config.Set("password", password)
-
 	executor := miner.NewPathExecutor(path)
 	trminer := teamredminer.New()
 	trminer.Init(ctx, config)
 
 	options := []miner.OptionConfigurable{
-		miner.WithAlgorithm(miner.Algorithm(algorithm)),
+		miner.WithPool(miner.Pool{
+			Algorithm: miner.Kawpow,
+			Url:       url,
+			User:      user,
+			Pass:      password,
+		}),
 		miner.WithExecutor(executor),
 	}
 

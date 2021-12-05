@@ -48,23 +48,23 @@ func newCommandStop() *commandStop {
 }
 
 func poolArgsBuilder(miner *Miner, args []string) ([]string, error) {
-	conf := miner.config
+	pool := miner.option.Pool
 
-	if conf.URL == "" {
+	if pool.Url == "" {
 		return nil, errors.New("pool url are required for mining")
 	}
-	if conf.User == "" {
+	if pool.User == "" {
 		return nil, errors.New("pool user are required for mining")
 	}
 
-	pass := conf.Password
+	pass := pool.Pass
 	if pass == "" {
 		pass = "x"
 	}
 
 	args = append(args,
-		"-u", conf.User,
-		"-o", conf.URL,
+		"-u", pool.User,
+		"-o", pool.Url,
 		"-p", pass,
 	)
 
@@ -73,7 +73,7 @@ func poolArgsBuilder(miner *Miner, args []string) ([]string, error) {
 
 func algorithmArgsBuilder(miner *Miner, args []string) ([]string, error) {
 	option := miner.option
-	algorithm := option.Algorithm
+	algorithm := option.Pool.Algorithm
 
 	supportedAlgorithms := miner.Algorithms()
 	algoritmStrings := make([]string, len(supportedAlgorithms))

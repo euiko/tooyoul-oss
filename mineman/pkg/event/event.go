@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
+	"github.com/euiko/tooyoul/mineman/pkg/log"
 )
 
 const (
@@ -28,6 +29,8 @@ type (
 	}
 
 	MessageHandlerFunc func(ctx context.Context, message Message)
+
+	MessageHandlerFuncErr func(ctx context.Context, message Message) error
 
 	Subscriber interface {
 		Subscribe(ctx context.Context, topic string) SubscriptionMsg
@@ -150,4 +153,17 @@ func NewSubscriptionForward(
 
 func (h MessageHandlerFunc) HandleMessage(ctx context.Context, message Message) {
 	h(ctx, message)
+}
+func (h MessageHandlerFuncErr) HandleMessage(ctx context.Context, message Message) {
+	var err error
+	if err = h(ctx, message); err != nil {
+		log.Error("error when handle event", log.WithError(err))
+		err = <-message.Nack(ctx)
+	} else {
+		err = <-message.Ack(ctx)
+	}
+
+	if err != nil {
+		log.Error("error when (n)acknowledge event message", log.WithError(err))
+	}
 }

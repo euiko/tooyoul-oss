@@ -14,6 +14,7 @@ type (
 
 		// some options
 		standalone bool
+		paths      []string
 	}
 
 	valueViper struct {
@@ -33,8 +34,13 @@ func (f ViperOptionsFunc) Configure(v *Viper) {
 }
 
 func (c *Viper) Sub(path string) Config {
+	sub := c.viper.Sub(path)
+	if sub == nil {
+		sub = viper.New()
+	}
+
 	return &Viper{
-		viper: c.viper.Sub(path),
+		viper: sub,
 	}
 }
 
@@ -63,34 +69,6 @@ func (c *Viper) OnChange(callback OnChangedFunc) {
 	c.viper.OnConfigChange(func(in fsnotify.Event) {
 		callback()
 	})
-}
-
-func ViperStandalone() ViperOptions {
-	return ViperOptionsFunc(func(v *Viper) {
-		v.standalone = true
-	})
-}
-
-func NewViper(path string, opts ...ViperOptions) *Viper {
-	v := viper.New()
-	vpr := Viper{
-		viper: v,
-	}
-
-	for _, o := range opts {
-		o.Configure(&vpr)
-	}
-
-	v.SetConfigName(path)
-	v.AddConfigPath(".")
-
-	if !vpr.standalone {
-		if err := v.ReadInConfig(); err != nil {
-			panic(err)
-		}
-	}
-
-	return &vpr
 }
 
 func (v *valueViper) Bool(def ...bool) bool {
@@ -190,4 +168,42 @@ func (v *valueViper) Scan(val interface{}) error {
 	}
 
 	return v.viper.UnmarshalKey(v.key, val)
+}
+
+func ViperStandalone() ViperOptions {
+	return ViperOptionsFunc(func(v *Viper) {
+		v.standalone = true
+	})
+}
+
+func ViperPaths(paths ...string) ViperOptions {
+	return ViperOptionsFunc(func(v *Viper) {
+		v.paths = paths
+	})
+}
+
+func NewViper(path string, opts ...ViperOptions) *Viper {
+	v := viper.New()
+	vpr := Viper{
+		viper: v,
+	}
+
+	for _, o := range opts {
+		o.Configure(&vpr)
+	}
+
+	v.SetConfigName(path)
+	v.AddConfigPath(".")
+
+	for _, p := range vpr.paths {
+		v.AddConfigPath(p)
+	}
+
+	if !vpr.standalone {
+		if err := v.ReadInConfig(); err != nil {
+			panic(err)
+		}
+	}
+
+	return &vpr
 }

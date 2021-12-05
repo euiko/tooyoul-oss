@@ -43,16 +43,26 @@ func Run(ctx context.Context, operation Operation) SignalNotifier {
 
 func RunWithStrategy(ctx context.Context, operation Operation, strategy RetryStrategy) SignalNotifier {
 	go run(ctx, operation, strategy)
-	return &signalInterceptor{}
+	return &signalInterceptor{
+		handlers: []SignalHandler{},
+	}
 }
 
 func run(ctx context.Context, operation Operation, strategy RetryStrategy) {
+
 	newCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	defer func() {
+		if err := recover(); err != nil {
+			log.Error("panic recovered in runner.run", log.WithField("err", err))
+			cancel()
+		}
+	}()
+
 	for {
 		// doOperation expect a blocking calls
-		err := doOperation(newCtx, operation)
+		err := operation.Run(newCtx)
 		if err == nil {
 			// reset retry strategy to mark that operation executed successfully
 			strategy.Reset()
@@ -78,14 +88,4 @@ func run(ctx context.Context, operation Operation, strategy RetryStrategy) {
 		}
 
 	}
-}
-
-func doOperation(ctx context.Context, operation Operation) error {
-	defer func() {
-		if err := recover(); err != nil {
-			log.Error("panic recovered in doOperation", log.WithField("err", err))
-		}
-	}()
-
-	return operation.Run(ctx)
 }

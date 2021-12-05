@@ -27,6 +27,7 @@ type (
 
 	Broker struct {
 		config Config
+		ctx    context.Context
 		cancel func()
 
 		// two different channel for closer
@@ -59,18 +60,24 @@ func (b *Broker) Init(ctx context.Context, c config.Config) error {
 
 func (b *Broker) Close(ctx context.Context) error {
 
-	if b.config.WaitOnClose {
-		b.closeWait <- closeCommand{}
-	} else {
-		b.closeDirect <- closeCommand{}
-	}
+	select {
+	case <-b.ctx.Done():
+		// do nothing
+		return errors.New("context already canceled")
+	default:
+		if b.config.WaitOnClose {
+			b.closeWait <- closeCommand{}
+		} else {
+			b.closeDirect <- closeCommand{}
+		}
 
-	close(b.closeDirect)
-	close(b.closeWait)
-	close(b.cmdBuffer)
-	close(b.pubBuffer)
-	for _, v := range b.subs {
-		close(v)
+		close(b.closeDirect)
+		close(b.closeWait)
+		close(b.cmdBuffer)
+		close(b.pubBuffer)
+		for _, v := range b.subs {
+			close(v)
+		}
 	}
 
 	return nil
@@ -78,12 +85,12 @@ func (b *Broker) Close(ctx context.Context) error {
 
 func (b *Broker) Publish(ctx context.Context, topic string, payload event.Payload) event.Publishing {
 	errChan := make(chan error)
-	b.cmdBuffer <- &publishCommand{
+	b.doErr(&publishCommand{
 		topic:   topicID(topic),
 		payload: payload,
 		err:     errChan,
 		ctx:     ctx,
-	}
+	}, errChan)
 	return event.NewPublishingChanForward(errChan)
 }
 
@@ -92,22 +99,24 @@ func (b *Broker) Subscribe(ctx context.Context, topic string) event.Subscription
 	defer close(subscriptionChan)
 	id := subscriberID(generateID())
 
-	b.cmdBuffer <- &subscribeCommand{
-		ctx:          ctx,
-		subscription: subscriptionChan,
-		id:           id,
-		topic:        topicID(topic),
+	select {
+	case <-b.ctx.Done():
+		subscriptionChan <- newSubscriptionChan(b, errors.New("context already canceled"))
+	default:
+		b.cmdBuffer <- &subscribeCommand{
+			ctx:          ctx,
+			subscription: subscriptionChan,
+			id:           id,
+			topic:        topicID(topic),
+		}
 	}
 
 	subscription := <-subscriptionChan
 
 	// watch subscription cancelation to close the channel
 	go func() {
-		select {
-		case <-subscription.Done():
-			subscription.Close()
-			return
-		}
+		<-subscription.Done()
+		subscription.Close()
 	}()
 
 	return subscription
@@ -152,8 +161,20 @@ func (b *Broker) start(ctx context.Context) {
 	}
 }
 
+func (b *Broker) doErr(cmd command, errChanToSend chan error) error {
+	select {
+	case <-b.ctx.Done():
+		err := errors.New("context already canceled")
+		errChanToSend <- err
+		return err
+	default:
+		b.cmdBuffer <- cmd
+	}
+	return nil
+}
+
 func (b *Broker) init(ctx context.Context) {
-	ctx, b.cancel = context.WithCancel(ctx)
+	b.ctx, b.cancel = context.WithCancel(ctx)
 
 	log.Trace("initializing channel broker...")
 	b.closeDirect = make(chan closeCommand)
@@ -165,31 +186,30 @@ func (b *Broker) init(ctx context.Context) {
 	b.subs = make(map[subscriberID]chan event.Message)
 
 	log.Trace("starting channel broker...")
-	go b.start(ctx)
+	go b.start(b.ctx)
 }
 
 func (b *Broker) handleCmd(ctx context.Context, cmd command) {
-	switch cmd.(type) {
+	switch cmd := cmd.(type) {
 	case *publishCommand:
-		publish := cmd.(*publishCommand)
 		select {
-		case b.pubBuffer <- *publish:
+		case b.pubBuffer <- *cmd:
 			// success, do nothing
 		default:
 			// failed to insert to publish buffer
-			publish.err <- ErrPublishBufferExceeded
-			defer close(publish.err)
+			cmd.err <- ErrPublishBufferExceeded
+			defer close(cmd.err)
 		}
 	case *unsubscribeCommand: // handle unsubscription first
-		b.handleUnsubscribe(ctx, cmd.(*unsubscribeCommand))
+		b.handleUnsubscribe(ctx, cmd)
 	case *subscribeCommand:
-		b.handleSubscribe(ctx, cmd.(*subscribeCommand))
+		b.handleSubscribe(ctx, cmd)
 	case *ackMsgCommand:
-		b.handleAckMsg(ctx, cmd.(*ackMsgCommand))
+		b.handleAckMsg(ctx, cmd)
 	case *progressMsgCommand:
-		b.handleProgressMsg(ctx, cmd.(*progressMsgCommand))
+		b.handleProgressMsg(ctx, cmd)
 	case *nackMsgCommand:
-		b.handleNackMsg(ctx, cmd.(*nackMsgCommand))
+		b.handleNackMsg(ctx, cmd)
 
 	}
 }
@@ -248,8 +268,6 @@ func (b *Broker) handleUnsubscribe(ctx context.Context, unsubscribe *unsubscribe
 		unsubscribe.errChan <- ErrAlreadyClosed
 		return
 	}
-
-	defer close(unsubscribe.errChan)
 
 	// cancel the context
 	if unsubscribe.cancel != nil {

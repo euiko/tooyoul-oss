@@ -26,13 +26,14 @@ func (s *subscriptionChan) Done() <-chan struct{} {
 
 func (s *subscriptionChan) Close() error {
 	errChan := make(chan error)
+	defer close(errChan)
 
-	s.broker.cmdBuffer <- &unsubscribeCommand{
+	s.broker.doErr(&unsubscribeCommand{
 		id:      s.id,
 		topic:   s.topic,
 		errChan: errChan,
 		cancel:  s.cancel,
-	}
+	}, errChan)
 
 	return <-errChan
 }

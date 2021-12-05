@@ -2,6 +2,7 @@ package event
 
 import (
 	"context"
+	"sync"
 
 	"github.com/euiko/tooyoul/mineman/pkg/app"
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
@@ -22,7 +23,7 @@ type (
 		module api.Module
 
 		sinks         []Sink
-		subscriptions []Subscription
+		subscriptions sync.Map
 	}
 )
 
@@ -76,11 +77,16 @@ func (h *Hook) Close(ctx context.Context) error {
 	log.Trace("closing subscriber...")
 
 	// close all subscription first
-	for _, sub := range h.subscriptions {
+	h.subscriptions.Range(func(key, value interface{}) bool {
+		sub := value.(Subscription)
+
 		if err := sub.Close(); err != nil {
-			return err
+			log.Error("failed when close event subscription", log.WithError(err))
+			return false
 		}
-	}
+
+		return true
+	})
 
 	log.Trace("closing the broker...")
 	// then close module
@@ -96,13 +102,13 @@ func (h *Hook) ModuleInitialized(ctx context.Context, m api.Module) {
 
 func (h *Hook) Run(ctx context.Context) app.Waiter {
 
-	for _, sink := range h.sinks {
+	for i, sink := range h.sinks {
 		sub := h.broker.SubscribeHandler(ctx, sink.Topic, sink.Handler)
 		if err := sub.Error(); err != nil {
 			return app.NewDirectWaiter(err)
 		}
 
-		h.subscriptions = append(h.subscriptions, sub)
+		h.subscriptions.Store(i, sub)
 	}
 	return app.NewDirectWaiter(nil)
 }

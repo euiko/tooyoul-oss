@@ -7,6 +7,7 @@ import (
 	_ "github.com/euiko/tooyoul/mineman/pkg/event/channel"
 
 	_ "github.com/euiko/tooyoul/mineman/modules/hello"
+	_ "github.com/euiko/tooyoul/mineman/modules/miner"
 	_ "github.com/euiko/tooyoul/mineman/modules/network"
 )
 

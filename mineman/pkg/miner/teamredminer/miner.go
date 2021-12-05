@@ -27,9 +27,7 @@ const (
 
 type (
 	Config struct {
-		URL      string `mapstructure:"url"`
-		User     string `mapstructure:"user"`
-		Password string `mapstructure:"password"`
+		// no additional config for now
 	}
 
 	Miner struct {
@@ -51,12 +49,21 @@ type (
 	}
 )
 
-func (m *Miner) Init(ctx context.Context, c config.Config) error {
+func (m *Miner) Name() string {
+	return name
+}
 
+func (m *Miner) Init(ctx context.Context, c config.Config) error {
+	m.c = c
 	m.cmdChan = make(chan command, cmdBuffer)
 	if err := c.Scan(&m.config); err != nil {
 		return err
 	}
+
+	// start the goroutine
+	log.Trace("starting background loop")
+	m.ctx, m.cancel = context.WithCancel(ctx)
+	go m.run(ctx)
 
 	return nil
 }
@@ -69,7 +76,12 @@ func (m *Miner) Close(ctx context.Context) error {
 		return err
 	}
 	if err := <-cmd.errChan; err != nil {
-		return err
+		switch err {
+		case miner.ErrMinerAlreadyStopped:
+			// do nothing
+		default:
+			return err
+		}
 	}
 
 	m.cancel()
@@ -118,14 +130,12 @@ func (m *Miner) Algorithms() []miner.Algorithm {
 	}
 }
 
-func (m *Miner) Start(ctx context.Context) error {
+func (m *Miner) Available() bool {
+	// TODO: handle check whether teamredminer available or not
+	return true
+}
 
-	// start the goroutine
-	if m.ctx == nil {
-		log.Debug("starting background loop")
-		m.ctx, m.cancel = context.WithCancel(ctx)
-		go m.run(ctx)
-	}
+func (m *Miner) Start(ctx context.Context) error {
 
 	log.Debug("sending start command")
 	cmd := newCommandStart()
@@ -153,17 +163,17 @@ func (m *Miner) Stop() error {
 func (m *Miner) Select(query *miner.DeviceQuery, target interface{}) (miner.Device, error) {
 	var result []gpuDevice
 
-	log.Debug("start looking up for selected device with query=%s", log.WithValues(query.String()))
+	log.Trace("start looking up for selected device with query=%s", log.WithValues(query.String()))
 	cmd := m.option.Executor.Execute(context.Background(), execName, []string{"--list_devices"})
 
 	b, err := cmd.Output()
 	if err != nil {
-		log.Debug("error occurred when collect teamredminer list_devices output", log.WithError(err))
+		log.Trace("error occurred when collect teamredminer list_devices output", log.WithError(err))
 		return nil, err
 	}
 
 	// scan through the result
-	log.Debug("parsing gpu texts")
+	log.Trace("parsing gpu texts")
 	gpus, err := parseDevices(b)
 	if err != nil {
 		return nil, err
@@ -192,7 +202,7 @@ func (m *Miner) Select(query *miner.DeviceQuery, target interface{}) (miner.Devi
 		}
 		result = append(result, gpu)
 	}
-	log.Debug("found %d selected device result", log.WithValues(len(result)))
+	log.Debug("found %d selected device", log.WithValues(len(result)))
 
 	return newDevice(result), nil
 }
@@ -236,7 +246,7 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 		return miner.ErrMinerAlreadyStarted
 	}
 
-	log.Debug("building command and arguments")
+	log.Trace("building command and arguments")
 	args, err := BuildCommandArgs(m)
 	if err != nil {
 		return err
@@ -245,7 +255,7 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 	// use wrapped context, so program initialize can be canceled in error case
 	ctx, m.execCancel = context.WithCancel(ctx)
 
-	log.Debug("get command execution")
+	log.Trace("get command execution")
 	// bind std in/out and start the command
 	execCmd := m.option.Executor.Execute(ctx, execName, args)
 	cancelStart := func(stop bool) {
@@ -258,7 +268,7 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 		}
 	}
 
-	log.Debug("piping std in/out and start command")
+	log.Trace("piping std in/out and start command")
 	m.stdIn, err = execCmd.StdinPipe()
 	if err != nil {
 		return err
@@ -279,7 +289,7 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 		return err
 	}
 
-	log.Debug("starting manager to process stdout")
+	log.Trace("starting manager to process stdout")
 	m.reader = pkgio.NewManagedReader(m.stdOut, m.stdErr)
 	if err := m.reader.StartAndWait(ctx, "Successfully initialized", waitTimeout); err != nil {
 		cancelStart(true)
@@ -287,10 +297,10 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 	}
 
 	log.Info("teamredminer started",
-		log.WithField("algorithm", m.option.Algorithm),
+		log.WithField("algorithm", m.option.Pool.Algorithm),
 		log.WithField("device", m.option.Device.String()),
-		log.WithField("url", m.config.URL),
-		log.WithField("user", m.config.User),
+		log.WithField("url", m.option.Pool.Url),
+		log.WithField("user", m.option.Pool.User),
 	)
 
 	m.state = stateStarted
@@ -302,12 +312,12 @@ func (m *Miner) stop(ctx context.Context, cmd *commandStop) error {
 		return miner.ErrMinerAlreadyStopped
 	}
 
-	log.Debug("stopping reader and close stdin/out")
+	log.Trace("stopping reader and close stdin/out")
 	if err := m.reader.Close(); err != nil {
 		return err
 	}
 
-	log.Debug("closing stdin")
+	log.Trace("closing stdin")
 	if err := m.stdIn.Close(); err != nil {
 		return err
 	}

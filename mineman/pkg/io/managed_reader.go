@@ -72,7 +72,6 @@ func (r *ManagedReader) WaitForText(text string, timeout time.Duration) error {
 			return
 		default:
 			if strings.Contains(t, text) {
-				log.Debug("waiting text completed, text found")
 				sendResult(nil)
 			}
 		}

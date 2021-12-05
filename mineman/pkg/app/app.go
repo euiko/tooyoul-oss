@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"os"
+	"path"
 	"syscall"
 
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
@@ -30,7 +31,13 @@ func (a *App) Run() error {
 	ctx, cancel := context.WithCancel(ctx)
 
 	// load config
-	a.config = config.NewViper(a.name)
+	viperOpts := []config.ViperOptions{}
+
+	homeDir := os.Getenv("HOME")
+	if homeDir != "" {
+		viperOpts = append(viperOpts, config.ViperPaths(path.Join(homeDir, ".config", a.name)))
+	}
+	a.config = config.NewViper(a.name, viperOpts...)
 
 	// load logger options
 	l.Init(ctx, a.config)
@@ -55,7 +62,6 @@ func (a *App) Run() error {
 		if err := a.hook.Close(ctx); err != nil {
 			log.Error("error when closing the hook")
 		}
-
 	})).Wait(ctx)
 
 	return nil
@@ -108,7 +114,8 @@ func (a *App) run(ctx context.Context) error {
 		return nil
 	}
 
-	return <-waiter.Wait()
+	err := <-waiter.Wait()
+	return err
 }
 
 func New(name string, hooks ...Hook) *App {

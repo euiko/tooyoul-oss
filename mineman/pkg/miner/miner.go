@@ -53,9 +53,9 @@ type (
 	}
 
 	Option struct {
-		Executor  Executor
-		Algorithm Algorithm
-		Device    *DeviceQuery
+		Executor Executor
+		Device   *DeviceQuery
+		Pool     Pool
 	}
 
 	OptionConfigurable interface {
@@ -66,10 +66,12 @@ type (
 
 	Miner interface {
 		api.Module
+		Name() string
 		Configure(opts ...OptionConfigurable)
 		Algorithms() []Algorithm
 		Start(ctx context.Context) error
 		Stop() error
+		Available() bool
 	}
 
 	MinerFactory func() Miner
@@ -83,9 +85,12 @@ func LoadMinerOption(option *Option, opts ...OptionConfigurable) *Option {
 	if option == nil {
 		// use default option when nil
 		option = &Option{
-			Executor:  NewPathExecutor(""),
-			Algorithm: Undefined,
-			Device:    nil,
+			Executor: NewPathExecutor(""),
+			Pool: Pool{
+				Algorithm: Undefined,
+				Pass:      "x",
+			},
+			Device: nil,
 		}
 	}
 
@@ -102,9 +107,15 @@ func WithExecutor(executor Executor) OptionConfigurable {
 	})
 }
 
-func WithAlgorithm(algorithm Algorithm) OptionConfigurable {
+func WithPool(pool Pool) OptionConfigurable {
 	return OptionFunc(func(o *Option) {
-		o.Algorithm = algorithm
+		o.Pool = pool
+	})
+}
+
+func WithDevice(device *DeviceQuery) OptionConfigurable {
+	return OptionFunc(func(o *Option) {
+		o.Device = device
 	})
 }
 

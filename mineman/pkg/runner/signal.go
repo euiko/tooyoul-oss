@@ -5,6 +5,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/euiko/tooyoul/mineman/pkg/log"
 )
 
 type (
@@ -29,6 +31,7 @@ func (h SignalHandlerFunc) Handle(ctx context.Context, sig os.Signal) {
 }
 
 func (i *signalInterceptor) Wait(ctx context.Context) {
+
 	sink := make(chan os.Signal, 1)
 	defer close(sink)
 
@@ -43,6 +46,7 @@ func (i *signalInterceptor) Wait(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case sig := <-sink:
+			log.Trace("calling signal handlers...")
 			if sig != syscall.SIGHUP {
 				i.callHandlers(ctx, sig)
 				return
