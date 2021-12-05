@@ -25,39 +25,39 @@ func (m *message) ID() string {
 
 // Ack will acknowledge the message and release the message
 func (m *message) Ack(ctx context.Context) <-chan error {
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 	m.broker.doErr(&ackMsgCommand{
 		id:           m.id,
 		subscriberID: m.subscriberID,
 		ctx:          ctx,
 		err:          errChan,
-	}, errChan)
+	}, errChan, true)
 
 	return errChan
 }
 
 // Progress will reserve the message for additional time
 func (m *message) Progress(ctx context.Context) <-chan error {
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 	m.broker.doErr(&progressMsgCommand{
 		id:           m.id,
 		subscriberID: m.subscriberID,
 		ctx:          ctx,
 		err:          errChan,
-	}, errChan)
+	}, errChan, true)
 
 	return errChan
 }
 
 // Nack will reschedule the message for current subscriber
 func (m *message) Nack(ctx context.Context) <-chan error {
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 	m.broker.doErr(&nackMsgCommand{
 		id:           m.id,
 		subscriberID: m.subscriberID,
 		ctx:          ctx,
 		err:          errChan,
-	}, errChan)
+	}, errChan, true)
 
 	return errChan
 }

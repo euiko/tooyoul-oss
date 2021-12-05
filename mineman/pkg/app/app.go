@@ -54,7 +54,6 @@ func (a *App) Run() error {
 		cancel()
 		return err
 	})).OnSignal(runner.SignalHandlerFunc(func(ctx context.Context, sig os.Signal) {
-		log.Trace("application closed")
 		if sig == syscall.SIGHUP {
 			return
 		}
@@ -62,6 +61,7 @@ func (a *App) Run() error {
 		if err := a.hook.Close(ctx); err != nil {
 			log.Error("error when closing the hook")
 		}
+		log.Trace("application closed")
 	})).Wait(ctx)
 
 	return nil

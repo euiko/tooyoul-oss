@@ -74,12 +74,10 @@ func (h *Hook) Close(ctx context.Context) error {
 		return nil
 	}
 
-	log.Trace("closing subscriber...")
-
 	// close all subscription first
 	h.subscriptions.Range(func(key, value interface{}) bool {
 		sub := value.(Subscription)
-
+		log.Trace("closing subscriber...", log.WithField("id", sub.ID()))
 		if err := sub.Close(); err != nil {
 			log.Error("failed when close event subscription", log.WithError(err))
 			return false

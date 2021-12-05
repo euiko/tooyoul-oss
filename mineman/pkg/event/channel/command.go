@@ -27,6 +27,7 @@ type (
 		id      subscriberID
 		topic   topicID
 		errChan chan error
+		ctx     context.Context
 		cancel  func()
 	}
 

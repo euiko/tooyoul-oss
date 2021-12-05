@@ -20,12 +20,16 @@ type (
 	}
 )
 
+func (s *subscriptionChan) ID() string {
+	return string(s.id)
+}
+
 func (s *subscriptionChan) Done() <-chan struct{} {
 	return s.ctx.Done()
 }
 
 func (s *subscriptionChan) Close() error {
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 	defer close(errChan)
 
 	s.broker.doErr(&unsubscribeCommand{
@@ -33,6 +37,7 @@ func (s *subscriptionChan) Close() error {
 		topic:   s.topic,
 		errChan: errChan,
 		cancel:  s.cancel,
+		ctx:     s.ctx,
 	}, errChan)
 
 	return <-errChan

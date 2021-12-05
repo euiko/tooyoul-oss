@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"errors"
+	"reflect"
 
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
 	"github.com/euiko/tooyoul/mineman/pkg/config"
@@ -70,21 +71,20 @@ func (b *Broker) Close(ctx context.Context) error {
 		} else {
 			b.closeDirect <- closeCommand{}
 		}
+		// wait till done
+		<-b.ctx.Done()
 
 		close(b.closeDirect)
 		close(b.closeWait)
-		close(b.cmdBuffer)
+		// close(b.cmdBuffer)
 		close(b.pubBuffer)
-		for _, v := range b.subs {
-			close(v)
-		}
 	}
 
 	return nil
 }
 
 func (b *Broker) Publish(ctx context.Context, topic string, payload event.Payload) event.Publishing {
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 	b.doErr(&publishCommand{
 		topic:   topicID(topic),
 		payload: payload,
@@ -145,30 +145,53 @@ func (b *Broker) SubscribeHandler(ctx context.Context, topic string, handler eve
 }
 
 func (b *Broker) start(ctx context.Context) {
+	defer log.Trace("channel broker event loop exited")
 	for {
 		select {
 		case <-ctx.Done():
+			log.Trace("exiting channel broker event loop...")
+
+			// close all subs channel
+			for _, v := range b.subs {
+				close(v)
+			}
+			// clear the map
+			b.subs = make(map[subscriberID]chan event.Message)
+			b.subsByTopic = make(map[topicID][]subscriberID)
+
 			return
 		case <-b.closeDirect: // prioritize close direct command
+			log.Trace("received a close direct")
 			b.cancel()
 		case cmd := <-b.cmdBuffer: // handle command first before publish
+			log.Trace("received a command, passing to the handler...")
 			b.handleCmd(ctx, cmd)
 		case publish := <-b.pubBuffer: // separate publish with command
+			log.Trace("received a publish")
 			b.handlePublish(ctx, publish)
 		case <-b.closeWait: // less prioritize the close wait command
+			log.Trace("received a close wait")
 			b.cancel()
 		}
 	}
 }
 
-func (b *Broker) doErr(cmd command, errChanToSend chan error) error {
+func (b *Broker) doErr(cmd command, errChanToSend chan error, closeOnSend ...bool) error {
 	select {
 	case <-b.ctx.Done():
 		err := errors.New("context already canceled")
+		log.Trace("skip doing command", log.WithError(err))
 		errChanToSend <- err
+
+		if len(closeOnSend) > 0 && closeOnSend[0] {
+			close(errChanToSend)
+		}
+
 		return err
 	default:
+		log.Trace("pushing command to the buffer %s...", log.WithValues(reflect.TypeOf(cmd)))
 		b.cmdBuffer <- cmd
+		log.Trace("command pushed %s", log.WithValues(reflect.TypeOf(cmd)))
 	}
 	return nil
 }
@@ -197,6 +220,7 @@ func (b *Broker) handleCmd(ctx context.Context, cmd command) {
 			// success, do nothing
 		default:
 			// failed to insert to publish buffer
+			log.Trace("publish buffer is full")
 			cmd.err <- ErrPublishBufferExceeded
 			defer close(cmd.err)
 		}
@@ -262,6 +286,7 @@ func (b *Broker) handleUnsubscribe(ctx context.Context, unsubscribe *unsubscribe
 	// cleaning up resources when the context is done
 	// do the clean up with reverse order to the subscribe counterparts
 
+	log.Trace("unsubscribing subscription", log.WithField("id", unsubscribe.id))
 	// lookup the subscription instance
 	s, ok := b.subs[unsubscribe.id]
 	if !ok {

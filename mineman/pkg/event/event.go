@@ -42,6 +42,7 @@ type (
 	}
 
 	Subscription interface {
+		ID() string
 		Error() error
 		Close() error
 	}
@@ -114,6 +115,10 @@ func (s *subscriptionDirect) Message() <-chan Message {
 
 func (s *subscriptionDirect) Done() <-chan struct{} {
 	return s.doneChan
+}
+
+func (s *subscriptionDirect) ID() string {
+	return "<no-id>"
 }
 
 // NewSubscriptionDirect emulate subscription that will be
