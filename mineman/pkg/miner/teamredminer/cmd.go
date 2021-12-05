@@ -20,9 +20,6 @@ type (
 	commandStop struct {
 		errChan chan error
 	}
-	commandExit struct {
-		errChan chan error
-	}
 
 	CommandBuilder func(miner *Miner, args []string) ([]string, error)
 )
@@ -31,9 +28,6 @@ func (cmd *commandStart) SendErr(err error) {
 	cmd.errChan <- err
 }
 func (cmd *commandStop) SendErr(err error) {
-	cmd.errChan <- err
-}
-func (cmd *commandExit) SendErr(err error) {
 	cmd.errChan <- err
 }
 
@@ -49,12 +43,6 @@ func newCommandStart() *commandStart {
 
 func newCommandStop() *commandStop {
 	return &commandStop{
-		errChan: make(chan error),
-	}
-}
-
-func newCommandExit() *commandExit {
-	return &commandExit{
 		errChan: make(chan error),
 	}
 }
@@ -98,7 +86,7 @@ func algorithmArgsBuilder(miner *Miner, args []string) ([]string, error) {
 		return nil, fmt.Errorf("algorithm of %s is not supported by %s", algorithm, name)
 	}
 
-	args = append(args, string(algorithm))
+	args = append(args, "-a", string(algorithm))
 
 	return args, nil
 }
@@ -147,6 +135,7 @@ func BuildCommandArgs(miner *Miner) ([]string, error) {
 }
 
 func init() {
+	RegisterCommandBuilder(poolArgsBuilder)
 	RegisterCommandBuilder(deviceArgsBuilder)
 	RegisterCommandBuilder(algorithmArgsBuilder)
 }

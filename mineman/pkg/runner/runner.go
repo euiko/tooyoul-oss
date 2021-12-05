@@ -51,6 +51,7 @@ func run(ctx context.Context, operation Operation, strategy RetryStrategy) {
 	defer cancel()
 
 	for {
+		// doOperation expect a blocking calls
 		err := doOperation(newCtx, operation)
 		if err == nil {
 			// reset retry strategy to mark that operation executed successfully

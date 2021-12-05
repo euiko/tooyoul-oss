@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/euiko/tooyoul/mineman/pkg/log"
 )
 
 var (
@@ -18,7 +20,7 @@ type (
 
 	ManagedReader struct {
 		// only these
-		rd io.ReadCloser
+		rds []io.ReadCloser
 
 		// some internal state
 		ctx     context.Context
@@ -41,20 +43,20 @@ type (
 )
 
 func (r *ManagedReader) WaitForText(text string, timeout time.Duration) error {
-	errChan := make(chan error, 1) // make a small buffer
+	errChan := make(chan error) // make a small buffer
 	defer close(errChan)
 
-	doneChan := make(chan struct{})
-	defer close(doneChan)
-
-	ctx, cancel := context.WithTimeout(r.ctx, timeout)
+	// use context also to synchronize whether result already send
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	sendResult := func(err error) {
 		select {
-		case <-doneChan:
+		case <-ctx.Done():
 			// do nothing
 		default:
+			// early cancel, for one of result send
+			cancel()
 			errChan <- err
 		}
 	}
@@ -70,6 +72,7 @@ func (r *ManagedReader) WaitForText(text string, timeout time.Duration) error {
 			return
 		default:
 			if strings.Contains(t, text) {
+				log.Debug("waiting text completed, text found")
 				sendResult(nil)
 			}
 		}
@@ -104,8 +107,25 @@ func (r *ManagedReader) Start(ctx context.Context) error {
 	}
 
 	r.ctx, r.cancel = context.WithCancel(ctx)
-	go r.start()
+	go r.start(r.ctx)
 	return nil
+}
+
+func (r *ManagedReader) StartAndWait(ctx context.Context, text string, timeout time.Duration) error {
+	if r.ctx != nil {
+		return errors.New("managed reader already started")
+	}
+
+	errChan := make(chan error, 1)
+	defer close(errChan)
+
+	r.ctx, r.cancel = context.WithCancel(ctx)
+	go func() {
+		errChan <- r.WaitForText(text, timeout)
+	}()
+	go r.start(r.ctx)
+	err := <-errChan
+	return err
 }
 
 func (r *ManagedReader) Close() error {
@@ -119,7 +139,12 @@ func (r *ManagedReader) Close() error {
 	r.cancel = nil
 
 	// close reader
-	return r.rd.Close()
+	for _, rd := range r.rds {
+		if err := rd.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *ManagedReader) addReadHook(cmd *manageCommandAddHook) {
@@ -133,23 +158,28 @@ func (r *ManagedReader) removeReadHook(cmd *manageCommandRemoveHook) {
 	delete(r.readHooks, cmd.id)
 }
 
-func (r *ManagedReader) start() {
-	textChan := make(chan string, 10)
+func (r *ManagedReader) start(ctx context.Context) {
+	textChan := make(chan string, len(r.rds)*10)
 	defer close(textChan)
-	go r.listen(textChan)
+
+	// listen all reader
+	for _, rd := range r.rds {
+		go r.listen(rd, textChan)
+	}
 
 	for {
 		select {
-		case <-r.ctx.Done():
+		case <-ctx.Done():
 			return
 		case cmd := <-r.cmdChan:
-			switch cmd.(type) {
+			switch cmd := cmd.(type) {
 			case *manageCommandAddHook:
-				r.addReadHook(cmd.(*manageCommandAddHook))
+				r.addReadHook(cmd)
 			case *manageCommandRemoveHook:
-				r.removeReadHook(cmd.(*manageCommandRemoveHook))
+				r.removeReadHook(cmd)
 			}
 		case text := <-textChan:
+			log.Debug("teamredminer stdout : %s", log.WithValues(text))
 			// call all hook
 			for _, h := range r.readHooks {
 				h(text)
@@ -158,9 +188,8 @@ func (r *ManagedReader) start() {
 	}
 }
 
-func (r *ManagedReader) listen(out chan string) {
-	scanner := bufio.NewScanner(r.rd)
-	defer close(out)
+func (r *ManagedReader) listen(rd io.Reader, out chan string) {
+	scanner := bufio.NewScanner(rd)
 	for scanner.Scan() {
 		select {
 		case <-r.ctx.Done():
@@ -171,9 +200,9 @@ func (r *ManagedReader) listen(out chan string) {
 	}
 }
 
-func NewManagedReader(r io.ReadCloser) *ManagedReader {
+func NewManagedReader(rds ...io.ReadCloser) *ManagedReader {
 	return &ManagedReader{
-		rd:        r,
+		rds:       rds,
 		cmdChan:   make(chan manageCommand, 10),
 		readHooks: make(map[uint64]ReadHook),
 	}

@@ -3,7 +3,6 @@ package teamredminer
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"strings"
 	"time"
@@ -19,10 +18,11 @@ var (
 )
 
 const (
-	name       = "teamredminer"
-	execName   = name
-	skipResult = 5
-	cmdBuffer  = 10
+	name        = "teamredminer"
+	execName    = name
+	skipResult  = 5
+	cmdBuffer   = 10
+	waitTimeout = time.Second * 15
 )
 
 type (
@@ -37,7 +37,6 @@ type (
 		option miner.Option
 		config Config
 
-		pool    miner.Pool
 		ctx     context.Context
 		cancel  func()
 		cmdChan chan command
@@ -45,6 +44,7 @@ type (
 		// some variables that only accessible from the loop
 		state      state
 		stdOut     io.ReadCloser
+		stdErr     io.ReadCloser
 		stdIn      io.WriteCloser
 		reader     *pkgio.ManagedReader
 		execCancel func() // to cancel program prior to stopping
@@ -130,6 +130,7 @@ func (m *Miner) Start(ctx context.Context) error {
 	log.Debug("sending start command")
 	cmd := newCommandStart()
 	defer close(cmd.errChan)
+
 	if err := m.do(cmd); err != nil {
 		return err
 	}
@@ -139,13 +140,14 @@ func (m *Miner) Start(ctx context.Context) error {
 
 func (m *Miner) Stop() error {
 
-	cmd := newCommandStart()
+	cmd := newCommandStop()
 	defer close(cmd.errChan)
+
 	if err := m.do(cmd); err != nil {
 		return err
 	}
 
-	return nil
+	return <-cmd.errChan
 }
 
 func (m *Miner) Select(query *miner.DeviceQuery, target interface{}) (miner.Device, error) {
@@ -220,11 +222,11 @@ func (m *Miner) run(ctx context.Context) {
 
 func (m *Miner) handleCmd(ctx context.Context, cmd command) {
 	var err error
-	switch cmd.(type) {
+	switch cmd := cmd.(type) {
 	case *commandStart:
-		err = m.start(ctx, cmd.(*commandStart))
+		err = m.start(ctx, cmd)
 	case *commandStop:
-		err = m.stop(ctx, cmd.(*commandStop))
+		err = m.stop(ctx, cmd)
 	}
 	cmd.SendErr(err)
 }
@@ -249,6 +251,7 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 	cancelStart := func(stop bool) {
 		m.stdIn = nil
 		m.stdOut = nil
+		m.stdErr = nil
 
 		if stop {
 			m.execCancel()
@@ -257,24 +260,38 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 
 	log.Debug("piping std in/out and start command")
 	m.stdIn, err = execCmd.StdinPipe()
-	m.stdOut, err = execCmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	m.stdOut, err = execCmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	m.stdErr, err = execCmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
 	if err := execCmd.Start(); err != nil {
 		cancelStart(false)
 		return err
 	}
 
 	log.Debug("starting manager to process stdout")
-	m.reader = pkgio.NewManagedReader(m.stdOut)
-	if err := m.reader.Start(ctx); err != nil {
+	m.reader = pkgio.NewManagedReader(m.stdOut, m.stdErr)
+	if err := m.reader.StartAndWait(ctx, "Successfully initialized", waitTimeout); err != nil {
 		cancelStart(true)
 		return err
 	}
 
-	log.Debug("waiting started flag received")
-	if err := m.reader.WaitForText("Successfully initialized", time.Second*10); err != nil {
-		cancelStart(true)
-		return fmt.Errorf("waiting program initialized is failed due to : %s", err)
-	}
+	log.Info("teamredminer started",
+		log.WithField("algorithm", m.option.Algorithm),
+		log.WithField("device", m.option.Device.String()),
+		log.WithField("url", m.config.URL),
+		log.WithField("user", m.config.User),
+	)
 
 	m.state = stateStarted
 	return nil
@@ -285,13 +302,21 @@ func (m *Miner) stop(ctx context.Context, cmd *commandStop) error {
 		return miner.ErrMinerAlreadyStopped
 	}
 
+	log.Debug("stopping reader and close stdin/out")
 	if err := m.reader.Close(); err != nil {
 		return err
 	}
 
+	log.Debug("closing stdin")
+	if err := m.stdIn.Close(); err != nil {
+		return err
+	}
+
 	m.execCancel()
+
 	m.stdIn = nil
 	m.stdOut = nil
+	m.stdErr = nil
 
 	m.state = stateStopped
 	return nil

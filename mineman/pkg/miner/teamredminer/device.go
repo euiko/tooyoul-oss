@@ -35,9 +35,9 @@ type (
 )
 
 var (
-	splitDeviceRegex     = regexp.MustCompile("(\\s{2,}|\\s{1,}\\d{2}:)")
-	parseBusIdFirstRegex = regexp.MustCompile("\\d+\\s+\\d+\\s+\\d+\\s+")
-	parseBusIdLastRegex  = regexp.MustCompile("\\s+.*")
+	splitDeviceRegex     = regexp.MustCompile(`(\s{2,}|\s{1,}\d{2}:)`)
+	parseBusIdFirstRegex = regexp.MustCompile(`\d+\s+\d+\s+\d+\s+`)
+	parseBusIdLastRegex  = regexp.MustCompile(`\s+.*`)
 )
 
 func (d *device) Next() bool {

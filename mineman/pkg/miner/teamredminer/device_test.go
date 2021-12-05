@@ -1,7 +1,6 @@
 package teamredminer
 
 import (
-	"encoding/json"
 	"testing"
 )
 
@@ -34,8 +33,7 @@ func TestParseDevice(t *testing.T) {
 		first.name != "Ellesmere" ||
 		first.model != "Radeon RX 580 Series" ||
 		first.cu != 36 {
-		encoded, _ := json.Marshal(first)
-		t.Fatalf("expect gpu with index=0, platform=0, opencl=1, busid=01:00.0, name=Ellesmere, model=Radeon RX 580 Series, cu=36, got %s", encoded)
+		t.Fatalf("expect gpu with index=0, platform=0, opencl=1, busid=01:00.0, name=Ellesmere, model=Radeon RX 580 Series, cu=36, got")
 	}
 
 	second := gpus[1]
@@ -46,7 +44,6 @@ func TestParseDevice(t *testing.T) {
 		second.name != "Fiji" ||
 		second.model != "AMD Radeon (TM) R9 Fury S" ||
 		second.cu != 56 {
-		encoded, _ := json.Marshal(second)
-		t.Fatalf("expect gpu with index=1, platform=0, opencl=0, busid=04:00.0, name=Fiji, model=AMD Radeon (TM) R9 Fury S, cu=56, got %s", encoded)
+		t.Fatalf("expect gpu with index=1, platform=0, opencl=0, busid=04:00.0, name=Fiji, model=AMD Radeon (TM) R9 Fury S, cu=56, got")
 	}
 }

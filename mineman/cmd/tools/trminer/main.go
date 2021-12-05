@@ -3,12 +3,13 @@ package main
 import (
 	"context"
 	"errors"
-	"time"
+	"os"
 
 	"github.com/euiko/tooyoul/mineman/pkg/config"
 	"github.com/euiko/tooyoul/mineman/pkg/log"
 	"github.com/euiko/tooyoul/mineman/pkg/miner"
 	"github.com/euiko/tooyoul/mineman/pkg/miner/teamredminer"
+	"github.com/euiko/tooyoul/mineman/pkg/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +27,23 @@ var (
 
 func main() {
 	cmd := new(cobra.Command)
-	cmd.RunE = run
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		trminer, err := load(ctx, cmd, args)
+		if err != nil {
+			return err
+		}
+
+		runner.Run(ctx, runner.OperationFunc(func(_ context.Context) error {
+			return trminer.Start(ctx)
+		})).
+			OnSignal(runner.SignalHandlerFunc(func(_ context.Context, sig os.Signal) {
+				trminer.Stop()
+			})).
+			Wait(ctx)
+
+		return nil
+	}
 	flags := cmd.Flags()
 	flags.StringVar(&url, "url", "", "set the mining url")
 	flags.StringVar(&user, "user", "", "user/wallet for mining")
@@ -43,22 +60,20 @@ func main() {
 	}
 }
 
-func run(cmd *cobra.Command, args []string) error {
+func load(ctx context.Context, cmd *cobra.Command, args []string) (*teamredminer.Miner, error) {
 
 	if url == "" {
-		return errors.New("url must be specified")
+		return nil, errors.New("url must be specified")
 	} else if user == "" {
-		return errors.New("users must be specified")
+		return nil, errors.New("users must be specified")
 	} else if algorithm == "" {
-		return errors.New("algorithm must be specified")
+		return nil, errors.New("algorithm must be specified")
 	}
 
 	// set debug level when enabled
 	if debug {
 		log.SetLevel(log.DebugLevel)
 	}
-
-	ctx := context.Background()
 	config := config.NewViper("trminer", config.ViperStandalone())
 	config.Set("url", url)
 	config.Set("user", user)
@@ -82,11 +97,5 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	trminer.Configure(options...)
-
-	if err := trminer.Start(ctx); err != nil {
-		return err
-	}
-
-	time.Sleep(time.Second * 20)
-	return trminer.Stop()
+	return trminer, nil
 }
