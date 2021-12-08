@@ -10,6 +10,24 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/mineman/cmd/mineman"
+        },
+        {
+            "name": "Launch TRMiner",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/mineman/cmd/tools/trminer",
+            "args": [
+                "--algorithm",
+                "kawpow",
+                "--url",
+                "stratum+tcp://raven.f2pool.com:3636",
+                "--user",
+                "euiko",
+                "--device-by-id",
+                "1",
+                "--debug"
+            ]
         }
     ]
 }
