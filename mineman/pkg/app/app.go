@@ -17,13 +17,14 @@ type App struct {
 	name   string
 	hook   Hook
 
-	modules []api.Module
+	injectedVals []interface{}
+	modules      []api.Module
 }
 
 var registry ModuleRegistry
 
-func RegisterModule(name string, factory ModuleFactory) {
-	registry.Register(name, factory)
+func (a *App) Inject(vals ...interface{}) {
+	a.injectedVals = append(a.injectedVals, vals...)
 }
 
 func (a *App) Run() error {
@@ -84,8 +85,8 @@ func (a *App) Run() error {
 
 func (a *App) run(ctx context.Context) error {
 
-	moduleFactories := registry.Load()
-	modules := make([]api.Module, len(moduleFactories))
+	moduleFactories := registry.LoadMap()
+	modules := []api.Module{}
 
 	log.Trace("initalizing hook...")
 	if err := a.hook.Init(ctx, a.config); err != nil {
@@ -96,12 +97,24 @@ func (a *App) run(ctx context.Context) error {
 
 	// instantiate all modules
 	log.Trace("loading modules...")
-	for i, f := range moduleFactories {
+	for n, f := range moduleFactories {
+		enabled := true
 		m := f()
+
+		if h, ok := a.hook.(HookModuleInterceptor); ok {
+			enabled = h.Intercept(n, m)
+		}
+
+		if !enabled {
+			continue
+		}
+
+		// call module loaded hook
 		if ext, ok := a.hook.(HookModuleExt); ok {
 			ext.ModuleLoaded(ctx, m)
 		}
-		modules[i] = m
+
+		modules = append(modules, m)
 	}
 	a.modules = modules
 	log.Trace("%d modules loaded", log.WithValues(len(modules)))
@@ -109,12 +122,16 @@ func (a *App) run(ctx context.Context) error {
 	// calls modules init
 	log.Trace("initializing modules...")
 	for _, m := range a.modules {
+
 		if err := m.Init(ctx, a.config); err != nil {
 			return err
 		}
 		if ext, ok := a.hook.(HookModuleExt); ok {
 			ext.ModuleInitialized(ctx, m)
 		}
+
+		// inject values after module initialized
+
 		defer func(m api.Module) {
 			if err := m.Close(ctx); err != nil {
 				log.Error("error while closing module", log.WithError(err))
@@ -139,4 +156,8 @@ func New(name string, hooks ...Hook) *App {
 		name: name,
 		hook: &chainedHook{hooks: hooks},
 	}
+}
+
+func RegisterModule(name string, factory ModuleFactory) {
+	registry.Register(name, factory)
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
 	"github.com/euiko/tooyoul/mineman/pkg/config"
@@ -21,8 +22,16 @@ type HookModuleExt interface {
 	ModuleInitialized(ctx context.Context, m api.Module)
 }
 
+// HookModuleInterceptor intercept loading of an module
+// you can use this to selectively load/unload module based on hook
+// e.g. selectively load modules by platform
+type HookModuleInterceptor interface {
+	Intercept(name string, module api.Module) bool
+}
+
 type chainedHook struct {
-	hooks []Hook
+	config config.Config
+	hooks  []Hook
 }
 
 type chainedWaiter struct {
@@ -35,6 +44,8 @@ type ChanWaiter struct {
 }
 
 func (h *chainedHook) Init(ctx context.Context, c config.Config) error {
+	h.config = c
+
 	for _, h := range h.hooks {
 		if err := h.Init(ctx, c); err != nil {
 			return err
@@ -79,6 +90,40 @@ func (h *chainedHook) ModuleInitialized(ctx context.Context, m api.Module) {
 			ext.ModuleInitialized(ctx, m)
 		}
 	}
+}
+
+func (h *chainedHook) Intercept(name string, m api.Module) bool {
+	// only one effective interceptor
+	var effectiveInterceptor HookModuleInterceptor
+	for _, h := range h.hooks {
+		if h, ok := h.(HookModuleInterceptor); ok {
+			// the first one is effective interceptor
+			effectiveInterceptor = h
+			break
+		}
+	}
+
+	// no one, do default
+	if effectiveInterceptor == nil {
+		return h.defaultInterceptor(name, m)
+	}
+
+	return effectiveInterceptor.Intercept(name, m)
+}
+
+// defaultInterceptor act as a fallback when there is no interceptor defined in hook
+// it will load the module acording its configuration and default loaded module properties
+func (h *chainedHook) defaultInterceptor(name string, module api.Module) bool {
+	// default loaded
+	enabled := true
+
+	// override when it say so
+	if dm, ok := module.(api.DefaultModule); ok {
+		enabled = dm.Default()
+	}
+
+	configKey := fmt.Sprintf("%s.enabled", name)
+	return h.config.Get(configKey).Bool(enabled)
 }
 
 func (w *chainedWaiter) Wait() <-chan error {
