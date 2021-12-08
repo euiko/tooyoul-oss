@@ -16,6 +16,8 @@ type App struct {
 	config config.Config
 	name   string
 	hook   Hook
+
+	modules []api.Module
 }
 
 var registry ModuleRegistry
@@ -35,7 +37,10 @@ func (a *App) Run() error {
 
 	homeDir := os.Getenv("HOME")
 	if homeDir != "" {
-		viperOpts = append(viperOpts, config.ViperPaths(path.Join(homeDir, ".config", a.name)))
+		viperOpts = append(viperOpts,
+			config.ViperPaths(homeDir),
+			config.ViperPaths(path.Join(homeDir, ".config", a.name)),
+		)
 	}
 	a.config = config.NewViper(a.name, viperOpts...)
 
@@ -58,9 +63,19 @@ func (a *App) Run() error {
 			return
 		}
 
-		if err := a.hook.Close(ctx); err != nil {
-			log.Error("error when closing the hook")
+		for _, m := range a.modules {
+			if err := m.Close(ctx); err != nil {
+				log.Error("error when closing modules", log.WithError(err))
+				return
+			}
 		}
+
+		if err := a.hook.Close(ctx); err != nil {
+			log.Error("error when closing hook", log.WithError(err))
+			return
+		}
+
+		cancel()
 		log.Trace("application closed")
 	})).Wait(ctx)
 
@@ -88,11 +103,12 @@ func (a *App) run(ctx context.Context) error {
 		}
 		modules[i] = m
 	}
+	a.modules = modules
 	log.Trace("%d modules loaded", log.WithValues(len(modules)))
 
 	// calls modules init
 	log.Trace("initializing modules...")
-	for _, m := range modules {
+	for _, m := range a.modules {
 		if err := m.Init(ctx, a.config); err != nil {
 			return err
 		}

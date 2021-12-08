@@ -133,7 +133,8 @@ func NewChanWaiter(channel chan error) *ChanWaiter {
 }
 
 func NewDirectWaiter(initial error) *ChanWaiter {
-	errChan := make(chan error)
+	// use buffered chan, so it can be used in the same thread
+	errChan := make(chan error, 1)
 	errChan <- initial
 	return &ChanWaiter{
 		channel: errChan,

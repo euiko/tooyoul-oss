@@ -3,8 +3,8 @@ package channel
 import (
 	"context"
 	"errors"
-	"reflect"
 
+	"github.com/euiko/tooyoul/mineman/pkg/app"
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
 	"github.com/euiko/tooyoul/mineman/pkg/config"
 	"github.com/euiko/tooyoul/mineman/pkg/event"
@@ -16,6 +16,7 @@ var (
 	ErrAlreadyClosed           = errors.New("subscription already closed")
 	ErrPublishBufferExceeded   = errors.New("can't handle anymore publish, buffer exceeded")
 	ErrSubscribeBufferExceeded = errors.New("can't send to the subscriber, buffer exceeded")
+	ErrStopped                 = errors.New("channel broker stopped")
 )
 
 type (
@@ -27,9 +28,10 @@ type (
 	}
 
 	Broker struct {
-		config Config
-		ctx    context.Context
-		cancel func()
+		config      Config
+		ctx         context.Context
+		cancel      func()
+		startOnInit bool
 
 		// two different channel for closer
 		closeWait   chan closeCommand
@@ -43,11 +45,21 @@ type (
 		subs        map[subscriberID]chan event.Message
 	}
 
+	Options interface {
+		Configure(b *Broker)
+	}
+
+	OptionsFunc func(b *Broker)
+
 	// some alias to help for easier reading
 	messageID    string
 	subscriberID string
 	topicID      string
 )
+
+func (f OptionsFunc) Configure(b *Broker) {
+	f(b)
+}
 
 func (b *Broker) Init(ctx context.Context, c config.Config) error {
 	log.Trace("loading event channel config...")
@@ -55,7 +67,9 @@ func (b *Broker) Init(ctx context.Context, c config.Config) error {
 		return err
 	}
 
-	b.init(ctx)
+	if b.startOnInit {
+		return <-b.Start(ctx).Wait()
+	}
 	return nil
 }
 
@@ -144,7 +158,7 @@ func (b *Broker) SubscribeHandler(ctx context.Context, topic string, handler eve
 	return subscription
 }
 
-func (b *Broker) start(ctx context.Context) {
+func (b *Broker) run(ctx context.Context) error {
 	defer log.Trace("channel broker event loop exited")
 	for {
 		select {
@@ -159,7 +173,7 @@ func (b *Broker) start(ctx context.Context) {
 			b.subs = make(map[subscriberID]chan event.Message)
 			b.subsByTopic = make(map[topicID][]subscriberID)
 
-			return
+			return ErrStopped
 		case <-b.closeDirect: // prioritize close direct command
 			log.Trace("received a close direct")
 			b.cancel()
@@ -189,16 +203,29 @@ func (b *Broker) doErr(cmd command, errChanToSend chan error, closeOnSend ...boo
 
 		return err
 	default:
-		log.Trace("pushing command to the buffer %s...", log.WithValues(reflect.TypeOf(cmd)))
 		b.cmdBuffer <- cmd
-		log.Trace("command pushed %s", log.WithValues(reflect.TypeOf(cmd)))
 	}
 	return nil
 }
 
-func (b *Broker) init(ctx context.Context) {
+func (b *Broker) Run(ctx context.Context) error {
 	b.ctx, b.cancel = context.WithCancel(ctx)
+	b.init()
 
+	log.Trace("running channel broker...")
+	return b.run(b.ctx)
+}
+
+func (b *Broker) Start(ctx context.Context) app.Waiter {
+	b.ctx, b.cancel = context.WithCancel(ctx)
+	b.init()
+
+	log.Trace("starting channel broker...")
+	go b.run(b.ctx)
+	return app.NewDirectWaiter(nil)
+}
+
+func (b *Broker) init() {
 	log.Trace("initializing channel broker...")
 	b.closeDirect = make(chan closeCommand)
 	b.closeWait = make(chan closeCommand)
@@ -207,9 +234,6 @@ func (b *Broker) init(ctx context.Context) {
 	b.progressMsg = make(map[messageID]event.Message)
 	b.subsByTopic = make(map[topicID][]subscriberID)
 	b.subs = make(map[subscriberID]chan event.Message)
-
-	log.Trace("starting channel broker...")
-	go b.start(b.ctx)
 }
 
 func (b *Broker) handleCmd(ctx context.Context, cmd command) {
@@ -268,9 +292,10 @@ func (b *Broker) handlePublish(ctx context.Context, publish publishCommand) {
 		// make the message for each subscriber
 		id := messageID(generateID())
 		msg := &message{
-			id:      id,
-			payload: publish.payload,
-			broker:  b,
+			id:           id,
+			payload:      publish.payload,
+			broker:       b,
+			subscriberID: s,
 		}
 
 		// append to the processing message list
@@ -374,37 +399,27 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 func (b *Broker) handleAckMsg(ctx context.Context, cmd *ackMsgCommand) {
 	defer close(cmd.err)
 
-	// for synchronize with the main loop
-	doneChan := make(chan struct{})
-	defer close(doneChan)
+	doChan := make(chan struct{}, 1)
+	defer close(doChan)
+	doChan <- struct{}{}
 
-	// do inside goroutine to also watch the context for cancel operation
-	go func() {
-		doChan := make(chan struct{}, 1)
-		defer close(doChan)
-		doChan <- struct{}{}
-
-		for {
-			select {
-			case <-ctx.Done(): // for the global context
-				cmd.err <- ErrOperationCanceled
-				// close synchronization channel
-				close(doneChan)
-				return
-			case <-cmd.ctx.Done():
-				cmd.err <- ErrOperationCanceled
-				close(doneChan)
-				return
-			case <-doChan:
-				// delete from progress message
-				delete(b.progressMsg, cmd.id)
-				// send result
-				cmd.err <- nil
-			}
+	for {
+		select {
+		case <-ctx.Done(): // for the global context
+			cmd.err <- ErrOperationCanceled
+			// close synchronization channel
+			return
+		case <-cmd.ctx.Done():
+			cmd.err <- ErrOperationCanceled
+			return
+		case <-doChan:
+			// delete from progress message
+			delete(b.progressMsg, cmd.id)
+			// send result
+			cmd.err <- nil
+			return
 		}
-	}()
-
-	<-doneChan
+	}
 }
 
 func (b *Broker) handleProgressMsg(ctx context.Context, cmd *progressMsgCommand) {
@@ -420,53 +435,61 @@ func (b *Broker) handleProgressMsg(ctx context.Context, cmd *progressMsgCommand)
 func (b *Broker) handleNackMsg(ctx context.Context, cmd *nackMsgCommand) {
 	defer close(cmd.err)
 
-	defer close(cmd.err)
-
-	// for synchronize with the main loop
-	doneChan := make(chan struct{})
-	defer close(doneChan)
-
 	// do inside goroutine to also watch the context for cancel operation
-	go func() {
-		doChan := make(chan struct{}, 1)
-		defer close(doChan)
-		doChan <- struct{}{}
+	doChan := make(chan struct{}, 1)
+	defer close(doChan)
+	doChan <- struct{}{}
 
-		for {
-			select {
-			case <-ctx.Done(): // for the global context
-				cmd.err <- ErrOperationCanceled
-				// close synchronization channel
-				close(doneChan)
-				return
-			case <-cmd.ctx.Done():
-				cmd.err <- ErrOperationCanceled
-				close(doneChan)
-				return
-			case <-doChan:
-				// resubmit the message
-				msg := b.progressMsg[cmd.id]
-				c := b.subs[cmd.subscriberID]
-				c <- msg
+	for {
+		select {
+		case <-ctx.Done(): // for the global context
+			cmd.err <- ErrOperationCanceled
+			// close synchronization channel
+			return
+		case <-cmd.ctx.Done():
+			cmd.err <- ErrOperationCanceled
+			return
+		case <-doChan:
+			// resubmit the message
+			msg := b.progressMsg[cmd.id]
+			c := b.subs[cmd.subscriberID]
+			c <- msg
 
-				// send result
-				cmd.err <- nil
-			}
+			// send result
+			cmd.err <- nil
+			return
 		}
-	}()
-
-	<-doneChan
+	}
 }
 
-func New() *Broker {
-	return &Broker{
+func WithRunOnInit(runOnInit bool) OptionsFunc {
+	return OptionsFunc(func(b *Broker) {
+		b.startOnInit = runOnInit
+	})
+}
+
+func WithConfig(config Config) OptionsFunc {
+	return OptionsFunc(func(b *Broker) {
+		b.config = config
+	})
+}
+
+func New(opts ...Options) *Broker {
+	broker := Broker{
+		startOnInit: true,
 		config: Config{
-			WaitOnClose:   false,
+			WaitOnClose:   true,
 			CmdBufferSize: 256,
 			PubBufferSize: 256,
 			SubBufferSize: 16,
 		},
 	}
+
+	for _, o := range opts {
+		o.Configure(&broker)
+	}
+
+	return &broker
 }
 
 // newEventBroker return the event's Broker interface, to help

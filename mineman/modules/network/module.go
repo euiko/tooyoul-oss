@@ -40,6 +40,8 @@ func (m *Module) Init(ctx context.Context, c config.Config) error {
 		return err
 	}
 
+	log.Trace("network config is %v", log.WithValues(m.conf))
+
 	go m.runPing(ctx)
 
 	return nil

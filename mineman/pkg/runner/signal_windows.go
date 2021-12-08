@@ -1,4 +1,6 @@
 // +build windows
+
+//go:build windows
 package runner
 
 import (

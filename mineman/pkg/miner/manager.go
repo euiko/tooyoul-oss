@@ -67,6 +67,7 @@ func (m *Manager) Close(ctx context.Context) error {
 }
 
 func (m *Manager) Start(ctx context.Context) error {
+	log.Trace("starting miner...")
 
 	for _, miner := range m.miners {
 		if err := miner.Start(ctx); err != nil {
@@ -79,15 +80,17 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 	}
 
+	log.Trace("miner started")
 	return nil
 }
 
 func (m *Manager) Stop(ctx context.Context) error {
+	log.Trace("stopping miner...")
 
 	for _, miner := range m.miners {
 		if err := miner.Stop(); err != nil {
 			if err == ErrMinerAlreadyStopped {
-				log.Trace("stop miner %s skipped, it is already started", log.WithValues(miner.Name()))
+				log.Trace("stop miner %s skipped, it is already stopped", log.WithValues(miner.Name()))
 				continue
 			}
 
@@ -95,6 +98,7 @@ func (m *Manager) Stop(ctx context.Context) error {
 		}
 	}
 
+	log.Trace("miner stopped")
 	return nil
 }
 

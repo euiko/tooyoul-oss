@@ -117,6 +117,9 @@ func Ping(ctx context.Context, target string, opts ...PingOption) (*Pinging, err
 	c, err := icmp.ListenPacket("udp4", "0.0.0.0")
 	if err != nil {
 		log.Fatal("failed when listening icmp packet", log.WithError(err))
+		close(pinging.channel)
+		close(pinging.doneChan)
+
 		return nil, err
 	}
 

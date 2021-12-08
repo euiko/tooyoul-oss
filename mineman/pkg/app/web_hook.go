@@ -134,7 +134,7 @@ func (h *WebHook) start(ctx context.Context) {
 
 func (h *WebHook) stop(ctx context.Context) error {
 	log.Trace("stopping web service...")
-	err := h.server.Close()
+	err := h.server.Shutdown(ctx)
 	log.Trace("web service stopped")
 	return err
 }

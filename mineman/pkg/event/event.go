@@ -159,6 +159,7 @@ func NewSubscriptionForward(
 func (h MessageHandlerFunc) HandleMessage(ctx context.Context, message Message) {
 	h(ctx, message)
 }
+
 func (h MessageHandlerFuncErr) HandleMessage(ctx context.Context, message Message) {
 	var err error
 	if err = h(ctx, message); err != nil {

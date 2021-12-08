@@ -54,7 +54,7 @@ func TestPubSub(t *testing.T) {
 		}
 	}
 
-	broker.init(ctx)
+	broker.Run(ctx)
 	defer broker.Close(ctx)
 
 	subscriptionA := broker.Subscribe(ctx, "hello")

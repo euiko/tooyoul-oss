@@ -108,6 +108,7 @@ func (h *Hook) Run(ctx context.Context) app.Waiter {
 
 		h.subscriptions.Store(i, sub)
 	}
+
 	return app.NewDirectWaiter(nil)
 }
 
