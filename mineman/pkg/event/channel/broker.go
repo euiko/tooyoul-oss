@@ -3,6 +3,7 @@ package channel
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/euiko/tooyoul/mineman/pkg/app"
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
@@ -14,6 +15,7 @@ import (
 var (
 	ErrOperationCanceled       = errors.New("operation canceled")
 	ErrAlreadyClosed           = errors.New("subscription already closed")
+	ErrCommandBufferExceeded   = errors.New("can't handle anymore command, buffer exceeded")
 	ErrPublishBufferExceeded   = errors.New("can't handle anymore publish, buffer exceeded")
 	ErrSubscribeBufferExceeded = errors.New("can't send to the subscriber, buffer exceeded")
 	ErrStopped                 = errors.New("channel broker stopped")
@@ -32,6 +34,7 @@ type (
 		ctx         context.Context
 		cancel      func()
 		startOnInit bool
+		drainLock   sync.Mutex
 
 		// two different channel for closer
 		closeWait   chan closeCommand
@@ -42,7 +45,7 @@ type (
 
 		progressMsg map[messageID]event.Message
 		subsByTopic map[topicID][]subscriberID
-		subs        map[subscriberID]chan event.Message
+		subs        map[subscriberID]*subscriptionChan
 	}
 
 	Options interface {
@@ -74,7 +77,6 @@ func (b *Broker) Init(ctx context.Context, c config.Config) error {
 }
 
 func (b *Broker) Close(ctx context.Context) error {
-
 	select {
 	case <-b.ctx.Done():
 		// do nothing
@@ -87,11 +89,6 @@ func (b *Broker) Close(ctx context.Context) error {
 		}
 		// wait till done
 		<-b.ctx.Done()
-
-		close(b.closeDirect)
-		close(b.closeWait)
-		// close(b.cmdBuffer)
-		close(b.pubBuffer)
 	}
 
 	return nil
@@ -99,12 +96,13 @@ func (b *Broker) Close(ctx context.Context) error {
 
 func (b *Broker) Publish(ctx context.Context, topic string, payload event.Payload) event.Publishing {
 	errChan := make(chan error, 1)
-	b.doErr(&publishCommand{
+
+	b.do(&publishCommand{
 		topic:   topicID(topic),
 		payload: payload,
 		err:     errChan,
 		ctx:     ctx,
-	}, errChan)
+	}, errChan, true)
 	return event.NewPublishingChanForward(errChan)
 }
 
@@ -160,18 +158,28 @@ func (b *Broker) SubscribeHandler(ctx context.Context, topic string, handler eve
 
 func (b *Broker) run(ctx context.Context) error {
 	defer log.Trace("channel broker event loop exited")
+
 	for {
 		select {
-		case <-ctx.Done():
+		case <-b.ctx.Done():
 			log.Trace("exiting channel broker event loop...")
 
 			// close all subs channel
 			for _, v := range b.subs {
-				close(v)
+				// cancel subscription context first
+				v.cancel()
+				// then close the channel
+				// close(v.channel)
 			}
 			// clear the map
-			b.subs = make(map[subscriberID]chan event.Message)
+			b.subs = make(map[subscriberID]*subscriptionChan)
 			b.subsByTopic = make(map[topicID][]subscriberID)
+
+			b.drainCommands()
+			b.drainPublish()
+
+			close(b.closeDirect)
+			close(b.closeWait)
 
 			return ErrStopped
 		case <-b.closeDirect: // prioritize close direct command
@@ -179,10 +187,10 @@ func (b *Broker) run(ctx context.Context) error {
 			b.cancel()
 		case cmd := <-b.cmdBuffer: // handle command first before publish
 			log.Trace("received a command, passing to the handler...")
-			b.handleCmd(ctx, cmd)
+			b.handleCmd(b.ctx, cmd)
 		case publish := <-b.pubBuffer: // separate publish with command
 			log.Trace("received a publish")
-			b.handlePublish(ctx, publish)
+			b.handlePublish(b.ctx, publish)
 		case <-b.closeWait: // less prioritize the close wait command
 			log.Trace("received a close wait")
 			b.cancel()
@@ -190,22 +198,61 @@ func (b *Broker) run(ctx context.Context) error {
 	}
 }
 
-func (b *Broker) doErr(cmd command, errChanToSend chan error, closeOnSend ...bool) error {
+func (b *Broker) do(cmd command, errChanToSend chan error, closeOnSend ...bool) error {
 	select {
-	case <-b.ctx.Done():
-		err := errors.New("context already canceled")
-		log.Trace("skip doing command", log.WithError(err))
-		errChanToSend <- err
+	case b.cmdBuffer <- cmd:
+		log.Trace("cmd sent")
+	default:
+		errChanToSend <- ErrCommandBufferExceeded
 
 		if len(closeOnSend) > 0 && closeOnSend[0] {
 			close(errChanToSend)
 		}
 
-		return err
-	default:
-		b.cmdBuffer <- cmd
+		return ErrCommandBufferExceeded
 	}
+
+	// drain published commands if already exited
+	select {
+	case <-b.ctx.Done():
+		log.Trace("drain commands")
+		b.drainCommands()
+		b.drainPublish()
+	default:
+	}
+
 	return nil
+}
+
+func (b *Broker) drainCommands() {
+	b.drainLock.Lock()
+	defer b.drainLock.Unlock()
+
+	for {
+		select {
+		case cmd := <-b.cmdBuffer:
+			b.handleCmd(b.ctx, cmd)
+		default:
+			// b.cmdBuffer = make(chan command, b.config.CmdBufferSize)
+			return
+		}
+	}
+
+}
+
+func (b *Broker) drainPublish() {
+	b.drainLock.Lock()
+	defer b.drainLock.Unlock()
+
+	for {
+		select {
+		case pub := <-b.pubBuffer:
+			pub.err <- ErrAlreadyClosed
+		default:
+			// b.pubBuffer = make(chan publishCommand, b.config.PubBufferSize)
+			return
+		}
+	}
 }
 
 func (b *Broker) Run(ctx context.Context) error {
@@ -233,21 +280,11 @@ func (b *Broker) init() {
 	b.pubBuffer = make(chan publishCommand, b.config.PubBufferSize)
 	b.progressMsg = make(map[messageID]event.Message)
 	b.subsByTopic = make(map[topicID][]subscriberID)
-	b.subs = make(map[subscriberID]chan event.Message)
+	b.subs = make(map[subscriberID]*subscriptionChan)
 }
 
 func (b *Broker) handleCmd(ctx context.Context, cmd command) {
 	switch cmd := cmd.(type) {
-	case *publishCommand:
-		select {
-		case b.pubBuffer <- *cmd:
-			// success, do nothing
-		default:
-			// failed to insert to publish buffer
-			log.Trace("publish buffer is full")
-			cmd.err <- ErrPublishBufferExceeded
-			defer close(cmd.err)
-		}
 	case *unsubscribeCommand: // handle unsubscription first
 		b.handleUnsubscribe(ctx, cmd)
 	case *subscribeCommand:
@@ -258,6 +295,19 @@ func (b *Broker) handleCmd(ctx context.Context, cmd command) {
 		b.handleProgressMsg(ctx, cmd)
 	case *nackMsgCommand:
 		b.handleNackMsg(ctx, cmd)
+	case *publishCommand:
+		select {
+		case <-ctx.Done():
+			cmd.err <- ErrAlreadyClosed
+			defer close(cmd.err)
+		case b.pubBuffer <- *cmd:
+			// success, do nothing
+		default:
+			// failed to insert to publish buffer
+			log.Trace("publish buffer is full")
+			cmd.err <- ErrPublishBufferExceeded
+			defer close(cmd.err)
+		}
 
 	}
 }
@@ -280,11 +330,11 @@ func (b *Broker) handlePublish(ctx context.Context, publish publishCommand) {
 	// expect all operation must success
 	for _, s := range subs {
 		c := b.subs[s]
-		if len(c) < b.config.SubBufferSize-1 {
+		if len(c.channel) < b.config.SubBufferSize-1 {
 			continue
 		}
 		publish.err <- ErrSubscribeBufferExceeded
-		break
+		return
 	}
 
 	// walk through all subs and send the message
@@ -302,7 +352,7 @@ func (b *Broker) handlePublish(ctx context.Context, publish publishCommand) {
 		b.progressMsg[id] = msg
 
 		c := b.subs[s]
-		c <- msg
+		c.channel <- msg
 	}
 }
 
@@ -311,40 +361,49 @@ func (b *Broker) handleUnsubscribe(ctx context.Context, unsubscribe *unsubscribe
 	// cleaning up resources when the context is done
 	// do the clean up with reverse order to the subscribe counterparts
 
-	log.Trace("unsubscribing subscription", log.WithField("id", unsubscribe.id))
-	// lookup the subscription instance
-	s, ok := b.subs[unsubscribe.id]
-	if !ok {
+	select {
+	case <-ctx.Done():
 		unsubscribe.errChan <- ErrAlreadyClosed
 		return
-	}
-
-	// cancel the context
-	if unsubscribe.cancel != nil {
-		unsubscribe.cancel()
-	}
-
-	// close the channel
-	close(s)
-
-	// clear the cache by topic
-	subs := b.subsByTopic[unsubscribe.topic]
-	newSubs := make([]subscriberID, len(subs)-1)
-	i := 0
-	for _, sub := range subs {
-		if sub == unsubscribe.id {
-			continue
+	case <-unsubscribe.ctx.Done():
+		unsubscribe.errChan <- ErrAlreadyClosed
+		return
+	default:
+		log.Trace("unsubscribing subscription", log.WithField("id", unsubscribe.id))
+		// lookup the subscription instance
+		s, ok := b.subs[unsubscribe.id]
+		if !ok {
+			unsubscribe.errChan <- ErrAlreadyClosed
+			return
 		}
-		newSubs[i] = sub
-		i++
+
+		// cancel the context
+		if unsubscribe.cancel != nil {
+			unsubscribe.cancel()
+		}
+
+		// close the channel
+		close(s.channel)
+
+		// clear the cache by topic
+		subs := b.subsByTopic[unsubscribe.topic]
+		newSubs := make([]subscriberID, len(subs)-1)
+		i := 0
+		for _, sub := range subs {
+			if sub == unsubscribe.id {
+				continue
+			}
+			newSubs[i] = sub
+			i++
+		}
+		b.subsByTopic[unsubscribe.topic] = newSubs
+
+		// remove the subscription
+		delete(b.subs, unsubscribe.id)
+
+		// send the result
+		unsubscribe.errChan <- nil
 	}
-	b.subsByTopic[unsubscribe.topic] = newSubs
-
-	// remove the subscription
-	delete(b.subs, unsubscribe.id)
-
-	// send the result
-	unsubscribe.errChan <- nil
 }
 
 func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeCommand) {
@@ -372,11 +431,7 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 				// make the channel
 				channel := make(chan event.Message, b.config.SubBufferSize)
 				// register subscriber
-				b.subs[subscribe.id] = channel
-				// cache by topic
-				b.subsByTopic[subscribe.topic] = append(b.subsByTopic[subscribe.topic], subscribe.id)
-				// send the result
-				subscribe.subscription <- newSubscriptionChanWithChannel(
+				subscription := newSubscriptionChanWithChannel(
 					subscribe.ctx,
 					b,
 					nil,
@@ -384,6 +439,12 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 					subscribe.id,
 					channel,
 				)
+				b.subs[subscribe.id] = subscription
+				// cache by topic
+				b.subsByTopic[subscribe.topic] = append(b.subsByTopic[subscribe.topic], subscribe.id)
+
+				// send the result
+				subscribe.subscription <- subscription
 
 				// flag that the channel already closed
 				closed = true
@@ -397,28 +458,20 @@ func (b *Broker) handleSubscribe(ctx context.Context, subscribe *subscribeComman
 }
 
 func (b *Broker) handleAckMsg(ctx context.Context, cmd *ackMsgCommand) {
-	defer close(cmd.err)
-
-	doChan := make(chan struct{}, 1)
-	defer close(doChan)
-	doChan <- struct{}{}
-
-	for {
-		select {
-		case <-ctx.Done(): // for the global context
-			cmd.err <- ErrOperationCanceled
-			// close synchronization channel
-			return
-		case <-cmd.ctx.Done():
-			cmd.err <- ErrOperationCanceled
-			return
-		case <-doChan:
-			// delete from progress message
-			delete(b.progressMsg, cmd.id)
-			// send result
-			cmd.err <- nil
-			return
-		}
+	select {
+	case <-ctx.Done(): // for the global context
+		cmd.err <- ErrAlreadyClosed
+		// close synchronization channel
+		return
+	case <-cmd.ctx.Done():
+		cmd.err <- ErrOperationCanceled
+		return
+	default:
+		// delete from progress message
+		delete(b.progressMsg, cmd.id)
+		// send result
+		cmd.err <- nil
+		return
 	}
 }
 
@@ -453,7 +506,7 @@ func (b *Broker) handleNackMsg(ctx context.Context, cmd *nackMsgCommand) {
 			// resubmit the message
 			msg := b.progressMsg[cmd.id]
 			c := b.subs[cmd.subscriberID]
-			c <- msg
+			c.channel <- msg
 
 			// send result
 			cmd.err <- nil

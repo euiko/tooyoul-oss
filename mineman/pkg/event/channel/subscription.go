@@ -32,7 +32,7 @@ func (s *subscriptionChan) Close() error {
 	errChan := make(chan error, 1)
 	defer close(errChan)
 
-	s.broker.doErr(&unsubscribeCommand{
+	s.broker.do(&unsubscribeCommand{
 		id:      s.id,
 		topic:   s.topic,
 		errChan: errChan,

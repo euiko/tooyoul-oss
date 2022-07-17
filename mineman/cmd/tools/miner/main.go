@@ -76,27 +76,31 @@ func load(ctx context.Context, cmd *cobra.Command, args []string) (*teamredminer
 	}
 	config := config.NewViper("trminer", config.ViperStandalone())
 	executor := miner.NewPathExecutor(path)
-	trminer := teamredminer.New()
-	trminer.Init(ctx, config)
 
-	options := []miner.OptionConfigurable{
-		miner.WithPool(miner.Pool{
-			Algorithm: miner.Kawpow,
-			Url:       url,
-			User:      user,
-			Pass:      password,
-		}),
-		miner.WithExecutor(executor),
+	pool := miner.Pool{
+		Algorithm: miner.Kawpow,
+		Url:       url,
+		User:      user,
+		Pass:      password,
 	}
-
+	settings := miner.Settings{
+		Executor: executor,
+		Pool:     pool,
+		Device: &miner.DeviceQuery{
+			ByIndex: deviceById,
+			ByName:  deviceByName,
+			ByBus:   deviceByBus,
+		},
+	}
 	if deviceById >= 0 {
-		options = append(options, miner.WithDeviceByIndex(deviceById))
+		settings.Device.By = miner.ByIndex
 	} else if deviceByBus != "" {
-		options = append(options, miner.WithDeviceByBus(deviceByBus))
+		settings.Device.By = miner.ByBus
 	} else if deviceByName != "" {
-		options = append(options, miner.WithDeviceByName(deviceByName))
+		settings.Device.By = miner.ByName
 	}
 
-	trminer.Configure(options...)
+	trminer := teamredminer.New(&settings)
+	trminer.Init(ctx, config)
 	return trminer, nil
 }

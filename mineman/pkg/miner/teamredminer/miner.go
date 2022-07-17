@@ -31,9 +31,9 @@ type (
 	}
 
 	Miner struct {
-		c      config.Config
-		option miner.Option
-		config Config
+		c        config.Config
+		settings *miner.Settings
+		config   Config
 
 		ctx     context.Context
 		cancel  func()
@@ -88,12 +88,6 @@ func (m *Miner) Close(ctx context.Context) error {
 	m.cancel = nil
 	m.ctx = nil
 	return nil
-}
-
-func (m *Miner) Configure(opts ...miner.OptionConfigurable) {
-	// default executor
-	m.option.Executor = miner.NewPathExecutor("")
-	miner.LoadMinerOption(&m.option, opts...)
 }
 
 func (m *Miner) Algorithms() []miner.Algorithm {
@@ -164,7 +158,7 @@ func (m *Miner) Select(query *miner.DeviceQuery, target interface{}) (miner.Devi
 	var result []gpuDevice
 
 	log.Trace("start looking up for selected device with query=%s", log.WithValues(query.String()))
-	cmd := m.option.Executor.Execute(context.Background(), execName, []string{"--list_devices"})
+	cmd := m.settings.Executor.Execute(context.Background(), execName, []string{"--list_devices"})
 
 	b, err := cmd.Output()
 	if err != nil {
@@ -257,7 +251,7 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 
 	log.Trace("get command execution")
 	// bind std in/out and start the command
-	execCmd := m.option.Executor.Execute(ctx, execName, args)
+	execCmd := m.settings.Executor.Execute(ctx, execName, args)
 	cancelStart := func(stop bool) {
 		m.stdIn = nil
 		m.stdOut = nil
@@ -297,10 +291,10 @@ func (m *Miner) start(ctx context.Context, cmd *commandStart) error {
 	}
 
 	log.Info("teamredminer started",
-		log.WithField("algorithm", m.option.Pool.Algorithm),
-		log.WithField("device", m.option.Device.String()),
-		log.WithField("url", m.option.Pool.Url),
-		log.WithField("user", m.option.Pool.User),
+		log.WithField("algorithm", m.settings.Pool.Algorithm),
+		log.WithField("device", m.settings.Device.String()),
+		log.WithField("url", m.settings.Pool.Url),
+		log.WithField("user", m.settings.Pool.User),
 	)
 
 	m.state = stateStarted
@@ -332,14 +326,18 @@ func (m *Miner) stop(ctx context.Context, cmd *commandStop) error {
 	return nil
 }
 
-func New() *Miner {
-	return &Miner{}
+func New(settings *miner.Settings) *Miner {
+	return &Miner{
+		settings: settings,
+	}
 }
 
-func newMiner() miner.Miner {
-	return New()
+func MinerFactory() miner.MinerFactory {
+	return func(s *miner.Settings) miner.Miner {
+		return New(s)
+	}
 }
 
 func init() {
-	miner.Register(name, newMiner)
+	miner.Register(name, MinerFactory())
 }

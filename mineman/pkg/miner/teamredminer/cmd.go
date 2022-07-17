@@ -48,7 +48,7 @@ func newCommandStop() *commandStop {
 }
 
 func poolArgsBuilder(miner *Miner, args []string) ([]string, error) {
-	pool := miner.option.Pool
+	pool := miner.settings.Pool
 
 	if pool.Url == "" {
 		return nil, errors.New("pool url are required for mining")
@@ -72,7 +72,7 @@ func poolArgsBuilder(miner *Miner, args []string) ([]string, error) {
 }
 
 func algorithmArgsBuilder(miner *Miner, args []string) ([]string, error) {
-	option := miner.option
+	option := miner.settings
 	algorithm := option.Pool.Algorithm
 
 	supportedAlgorithms := miner.Algorithms()
@@ -93,7 +93,7 @@ func algorithmArgsBuilder(miner *Miner, args []string) ([]string, error) {
 
 func deviceArgsBuilder(miner *Miner, args []string) ([]string, error) {
 	var selectedGpus []string
-	option := miner.option
+	option := miner.settings
 
 	// build devices arguments
 	if option.Device != nil {
