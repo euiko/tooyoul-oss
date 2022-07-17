@@ -122,7 +122,12 @@ func (m *Manager) createMiner(ctx context.Context, c config.Config, config Minin
 		return nil, fmt.Errorf("miner %s doesn't exists, make sure you are using supported miner", config.Miner)
 	}
 
-	miner := factory()
+	settings := newSettings(
+		WithPool(pool),
+		WithDevice(deviceQuery),
+		WithExecutor(executor),
+	)
+	miner := factory(settings)
 	if !miner.Available() {
 		// TODO: handle when miner program not available (maybe download from source)
 		return nil, fmt.Errorf("miner %s are not available in your system, make sure you are install it properly", config.Miner)
@@ -130,12 +135,6 @@ func (m *Manager) createMiner(ctx context.Context, c config.Config, config Minin
 	if err := miner.Init(ctx, c); err != nil {
 		return nil, err
 	}
-
-	miner.Configure(
-		WithPool(pool),
-		WithDevice(deviceQuery),
-		WithExecutor(executor),
-	)
 
 	return miner, nil
 }

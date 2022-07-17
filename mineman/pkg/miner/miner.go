@@ -52,75 +52,54 @@ type (
 		Download(ctx context.Context) <-chan error
 	}
 
-	Option struct {
+	Settings struct {
 		Executor Executor
 		Device   *DeviceQuery
 		Pool     Pool
 	}
 
-	OptionConfigurable interface {
-		Configure(o *Option)
+	Option interface {
+		Configure(o *Settings)
 	}
 
-	OptionFunc func(o *Option)
+	OptionFunc func(o *Settings)
 
 	Miner interface {
 		api.Module
 		Name() string
-		Configure(opts ...OptionConfigurable)
 		Algorithms() []Algorithm
 		Start(ctx context.Context) error
 		Stop() error
 		Available() bool
 	}
 
-	MinerFactory func() Miner
+	MinerFactory func(*Settings) Miner
 )
 
-func (f OptionFunc) Configure(o *Option) {
+func (f OptionFunc) Configure(o *Settings) {
 	f(o)
 }
 
-func LoadMinerOption(option *Option, opts ...OptionConfigurable) *Option {
-	if option == nil {
-		// use default option when nil
-		option = &Option{
-			Executor: NewPathExecutor(""),
-			Pool: Pool{
-				Algorithm: Undefined,
-				Pass:      "x",
-			},
-			Device: nil,
-		}
-	}
-
-	for _, f := range opts {
-		f.Configure(option)
-	}
-
-	return option
-}
-
-func WithExecutor(executor Executor) OptionConfigurable {
-	return OptionFunc(func(o *Option) {
+func WithExecutor(executor Executor) Option {
+	return OptionFunc(func(o *Settings) {
 		o.Executor = executor
 	})
 }
 
-func WithPool(pool Pool) OptionConfigurable {
-	return OptionFunc(func(o *Option) {
+func WithPool(pool Pool) Option {
+	return OptionFunc(func(o *Settings) {
 		o.Pool = pool
 	})
 }
 
-func WithDevice(device *DeviceQuery) OptionConfigurable {
-	return OptionFunc(func(o *Option) {
+func WithDevice(device *DeviceQuery) Option {
+	return OptionFunc(func(o *Settings) {
 		o.Device = device
 	})
 }
 
-func WithDeviceByIndex(index int) OptionConfigurable {
-	return OptionFunc(func(o *Option) {
+func WithDeviceByIndex(index int) Option {
+	return OptionFunc(func(o *Settings) {
 		o.Device = &DeviceQuery{
 			ByIndex: index,
 			By:      ByIndex,
@@ -128,8 +107,8 @@ func WithDeviceByIndex(index int) OptionConfigurable {
 	})
 }
 
-func WithDeviceByName(name string) OptionConfigurable {
-	return OptionFunc(func(o *Option) {
+func WithDeviceByName(name string) Option {
+	return OptionFunc(func(o *Settings) {
 		o.Device = &DeviceQuery{
 			ByName: name,
 			By:     ByName,
@@ -137,11 +116,29 @@ func WithDeviceByName(name string) OptionConfigurable {
 	})
 }
 
-func WithDeviceByBus(bus string) OptionConfigurable {
-	return OptionFunc(func(o *Option) {
+func WithDeviceByBus(bus string) Option {
+	return OptionFunc(func(o *Settings) {
 		o.Device = &DeviceQuery{
 			ByBus: bus,
 			By:    ByBus,
 		}
 	})
+}
+
+func newSettings(opts ...Option) *Settings {
+	// use default settings when nil
+	settings := &Settings{
+		Executor: NewPathExecutor(""),
+		Pool: Pool{
+			Algorithm: Undefined,
+			Pass:      "x",
+		},
+		Device: nil,
+	}
+
+	for _, f := range opts {
+		f.Configure(settings)
+	}
+
+	return settings
 }

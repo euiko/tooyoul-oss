@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -14,15 +15,19 @@ func TestPubSub(t *testing.T) {
 	ctx := context.Background()
 	broker := New()
 
-	doneA := make(chan struct{})
+	closeDone := make(chan struct{}, 1)
+
+	doneA := make(chan struct{}, 1)
 	defer close(doneA)
 	resultA := []string{}
-	doneB := make(chan struct{})
+	doneB := make(chan struct{}, 1)
 	defer close(doneB)
 	resultB := []string{}
 
 	subscriberA := func(sub event.SubscriptionMsg) {
-		defer func() { doneA <- struct{}{} }()
+		defer func() {
+			doneA <- struct{}{}
+		}()
 		for {
 			select {
 			case <-sub.Done():
@@ -54,42 +59,70 @@ func TestPubSub(t *testing.T) {
 		}
 	}
 
-	broker.Run(ctx)
-	defer broker.Close(ctx)
+	broker.Start(ctx)
 
 	subscriptionA := broker.Subscribe(ctx, "hello")
 	subscriptionB := broker.Subscribe(ctx, "hello")
 
-	broker.Publish(ctx, "hello", event.StringPayload("halo"))
-	broker.Publish(ctx, "hello", event.StringPayload("dunia"))
-	broker.Publish(ctx, "hello", event.StringPayload("apakabar"))
-	broker.Publish(ctx, "hala", event.StringPayload("halo"))
+	seeds := []string{
+		"brown",
+		"blue",
+		"red",
+		"green",
+	}
+	testCases := []string{}
+
+	// generate test cases by power of 10
+	target := int64(math.Pow10(4))
+	for target > 0 {
+		i := int(target % int64(len(seeds)))
+		testCases = append(testCases, seeds[i])
+		target--
+	}
 
 	go subscriberA(subscriptionA)
 	go subscriberB(subscriptionB)
 
 	// close the subscription after 200 milli
 	go func() {
-		<-time.After(time.Millisecond * 50)
-		subscriptionA.Close()
-		subscriptionB.Close()
+		<-time.After(time.Millisecond * 200)
+		broker.Close(ctx)
+		close(closeDone)
 	}()
 
+	expects := []string{}
+	for _, testCase := range testCases {
+		if err := <-broker.Publish(ctx, "hello", event.StringPayload(testCase)).Error(); err != nil {
+			log.Trace("failed to publish with err", log.WithError(err))
+			break
+		}
+		log.Error("hello sent")
+		expects = append(expects, testCase)
+
+		if err := <-broker.Publish(ctx, "hala", event.StringPayload(testCase)).Error(); err != nil {
+			break
+		}
+		log.Error("hala sent")
+	}
+
+	log.Error("start function done")
 	<-doneA
+	log.Trace("done A")
 	<-doneB
+	log.Trace("done B")
+	<-closeDone
+	log.Trace("done all")
 
 	check := func(toCheck []string) {
-		if v := toCheck[0]; v != "halo" {
-			t.Fatalf("expect first result is halo, got %s", v)
+		if len(toCheck) != len(expects) {
+			t.Errorf("expect result has length %d, but got %d", len(expects), len(toCheck))
 			return
 		}
-		if v := toCheck[1]; v != "dunia" {
-			t.Fatalf("expect first result is dunia, got %s", v)
-			return
-		}
-		if v := toCheck[2]; v != "apakabar" {
-			t.Fatalf("expect first result is apakabar, got %s", v)
-			return
+		for i, expect := range expects {
+			got := toCheck[i]
+			if expect != got {
+				t.Errorf("expect result on index-%d is '%s', but got '%s'", i, expect, got)
+			}
 		}
 	}
 
