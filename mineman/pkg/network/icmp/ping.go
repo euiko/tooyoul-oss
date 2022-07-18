@@ -156,6 +156,7 @@ func runPing(ctx context.Context, conn *icmp.PacketConn, req *PingRequest, pingi
 			}
 
 			pinging.doneChan <- struct{}{}
+			return
 		}
 	}
 }
