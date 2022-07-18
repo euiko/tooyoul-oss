@@ -18,7 +18,7 @@ import (
 )
 
 type (
-	Config struct {
+	Settings struct {
 		Enabled       bool          `mapstructure:"enabled"`
 		Interval      time.Duration `mapstructure:"interval"`
 		Count         int           `mapstructure:"count"`
@@ -29,18 +29,18 @@ type (
 	}
 
 	Module struct {
-		c    config.Config
-		conf Config
+		c        config.Config
+		settings Settings
 	}
 )
 
 func (m *Module) Init(ctx context.Context, c config.Config) error {
 	m.c = c
-	if err := c.Get("network").Scan(&m.conf); err != nil {
+	if err := c.Get("network").Scan(&m.settings); err != nil {
 		return err
 	}
 
-	log.Trace("network config is %v", log.WithValues(m.conf))
+	log.Trace("network config is %v", log.WithValues(m.settings))
 
 	go m.runPing(ctx)
 
@@ -55,7 +55,7 @@ func (m *Module) runPing(ctx context.Context) {
 
 	log.Trace("running ping...")
 	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = m.conf.Interval
+	b.InitialInterval = m.settings.Interval
 
 	errCount := 0
 	okCount := 0
@@ -80,7 +80,7 @@ func (m *Module) runPing(ctx context.Context) {
 				errCount++
 
 				// reset okCount when err threshold met
-				if errCount == m.conf.DownThreshold {
+				if errCount == m.settings.DownThreshold {
 					okCount = 0
 					log.Debug("network changes detected to down")
 					e := network.EventNetworkDown{
@@ -107,7 +107,7 @@ func (m *Module) runPing(ctx context.Context) {
 			b.Reset()
 
 			// reset errCount when ok threshold met
-			if okCount == m.conf.UpThreshold {
+			if okCount == m.settings.UpThreshold {
 				errCount = 0
 				log.Debug("network changes detected to up")
 				e := network.EventNetworkUp{
@@ -132,13 +132,13 @@ func (m *Module) doPing(ctx context.Context) error {
 
 	var (
 		totalDone   int32 = 0
-		totalTarget       = len(m.conf.Targets)
+		totalTarget       = len(m.settings.Targets)
 		pingChan          = make(chan icmp.PingResult)
 		result            = []icmp.PingResult{}
 	)
 
-	for _, target := range m.conf.Targets {
-		p, err := icmp.Ping(ctx, target, icmp.PingCount(m.conf.Count))
+	for _, target := range m.settings.Targets {
+		p, err := icmp.Ping(ctx, target, icmp.PingCount(m.settings.Count))
 		if err != nil {
 			return err
 		}
@@ -180,7 +180,7 @@ collect:
 	totalPing := len(result)
 	lossRatio := float64(totalError) / float64(totalPing)
 
-	if lossRatio >= m.conf.LossThreshold {
+	if lossRatio >= m.settings.LossThreshold {
 		return errors.New(fmt.Sprintf("loss exceed threshold, with %d/%d loss detected", totalError, totalPing))
 	}
 
@@ -189,7 +189,7 @@ collect:
 
 func New() *Module {
 	return &Module{
-		conf: Config{
+		settings: Settings{
 			Interval:      time.Second * 10,
 			LossThreshold: 0.2,
 			Count:         3,
