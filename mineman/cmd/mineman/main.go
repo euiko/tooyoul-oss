@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	app := app.New("mineman", event.NewHook(), app.NewWebHook())
+	app := app.New("mineman", newHook(), event.NewHook(), app.NewWebHook())
 	if err := app.Run(); err != nil {
 		println("error running app :", err)
 		return
