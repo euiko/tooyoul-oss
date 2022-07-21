@@ -64,14 +64,15 @@ func (a *App) Run() error {
 			return
 		}
 
+		newCtx := context.TODO()
 		for _, m := range a.modules {
-			if err := m.Close(ctx); err != nil {
+			if err := m.Close(newCtx); err != nil {
 				log.Error("error when closing modules", log.WithError(err))
 				return
 			}
 		}
 
-		if err := a.hook.Close(ctx); err != nil {
+		if err := a.hook.Close(newCtx); err != nil {
 			log.Error("error when closing hook", log.WithError(err))
 			return
 		}

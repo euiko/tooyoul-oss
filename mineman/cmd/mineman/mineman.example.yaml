@@ -6,6 +6,7 @@ web:
 event:
   enabled: true
 miner:
+  enabled: true
   pools:
     kharis:
       url: stratum+tcp://raven.f2pool.com:3636
@@ -16,3 +17,13 @@ miner:
     - miner: teamredminer
       pool: kharis
       device: index:1
+network:
+  enabled: true
+  interval: 10s
+  count: 3
+  loss_threshold: 0.2
+  down_threshold: 2
+  up_threshold: 2
+  targets:
+    - "8.8.8.8"
+    - "208.67.222.222"

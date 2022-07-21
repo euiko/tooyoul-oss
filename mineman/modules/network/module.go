@@ -2,7 +2,6 @@ package network
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -19,13 +18,14 @@ import (
 
 type (
 	Settings struct {
-		Enabled       bool          `mapstructure:"enabled"`
-		Interval      time.Duration `mapstructure:"interval"`
-		Count         int           `mapstructure:"count"`
-		LossThreshold float64       `mapstructure:"loss_threshold"`
-		DownThreshold int           `mapstructure:"down_threshold"`
-		UpThreshold   int           `mapstructure:"up_threshold"`
-		Targets       []string      `mapstructure:"targets"`
+		Enabled         bool          `mapstructure:"enabled"`
+		InitialInterval time.Duration `mapstructure:"initial_interval"`
+		MaxInterval     time.Duration `mapstructure:"max_interval"`
+		Count           int           `mapstructure:"count"`
+		LossThreshold   float64       `mapstructure:"loss_threshold"`
+		DownThreshold   int           `mapstructure:"down_threshold"`
+		UpThreshold     int           `mapstructure:"up_threshold"`
+		Targets         []string      `mapstructure:"targets"`
 	}
 
 	Module struct {
@@ -40,8 +40,11 @@ func (m *Module) Init(ctx context.Context, c config.Config) error {
 		return err
 	}
 
-	log.Trace("network config is %v", log.WithValues(m.settings))
+	if !m.settings.Enabled {
+		return nil
+	}
 
+	log.Trace("network config is %v", log.WithValues(m.settings))
 	go m.runPing(ctx)
 
 	return nil
@@ -53,21 +56,26 @@ func (m *Module) Close(ctx context.Context) error {
 
 func (m *Module) runPing(ctx context.Context) {
 
-	log.Trace("running ping...")
+	log.Trace("running ping...", log.WithField("initial_interval", m.settings.InitialInterval.String()))
+
+	// setup exponential backoff
 	b := backoff.NewExponentialBackOff()
-	b.InitialInterval = m.settings.Interval
+	b.InitialInterval = m.settings.InitialInterval
+	b.MaxInterval = m.settings.MaxInterval
+	b.Reset() // reset for the first attempt
 
 	errCount := 0
 	okCount := 0
 
 	// TODO: refactor with state machine
 	for {
+		timeout := b.NextBackOff()
+		log.Trace("waiting backoff timeout", log.WithField("timeout", timeout.String()))
 		select {
 		case <-ctx.Done():
 			return
 			// re run the tests
-		case <-time.After(b.NextBackOff()):
-
+		case <-time.After(timeout):
 			log.Debug("doing ping...")
 			if err := m.doPing(ctx); err != nil {
 				if errCount > 0 && okCount > 0 {
@@ -181,7 +189,7 @@ collect:
 	lossRatio := float64(totalError) / float64(totalPing)
 
 	if lossRatio >= m.settings.LossThreshold {
-		return errors.New(fmt.Sprintf("loss exceed threshold, with %d/%d loss detected", totalError, totalPing))
+		return fmt.Errorf("loss exceed threshold, with %d/%d loss detected", totalError, totalPing)
 	}
 
 	return nil
@@ -190,11 +198,13 @@ collect:
 func New() *Module {
 	return &Module{
 		settings: Settings{
-			Interval:      time.Second * 10,
-			LossThreshold: 0.2,
-			Count:         3,
-			DownThreshold: 2,
-			UpThreshold:   2,
+			Enabled:         false,
+			InitialInterval: time.Second * 10,
+			MaxInterval:     time.Second * 30,
+			LossThreshold:   0.2,
+			Count:           3,
+			DownThreshold:   2,
+			UpThreshold:     2,
 			Targets: []string{
 				"8.8.8.8",
 				"208.67.222.222",

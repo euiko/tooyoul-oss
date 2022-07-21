@@ -78,6 +78,9 @@ func (b *Broker) Init(ctx context.Context, c config.Config) error {
 
 func (b *Broker) Close(ctx context.Context) error {
 	select {
+	case <-ctx.Done():
+		// do nothing
+		return errors.New("context already canceled")
 	case <-b.ctx.Done():
 		// do nothing
 		return errors.New("context already canceled")
@@ -166,10 +169,8 @@ func (b *Broker) run(ctx context.Context) error {
 
 			// close all subs channel
 			for _, v := range b.subs {
-				// cancel subscription context first
+				// cancel subscription
 				v.cancel()
-				// then close the channel
-				// close(v.channel)
 			}
 			// clear the map
 			b.subs = make(map[subscriberID]*subscriptionChan)
@@ -201,7 +202,7 @@ func (b *Broker) run(ctx context.Context) error {
 func (b *Broker) do(cmd command, errChanToSend chan error, closeOnSend ...bool) error {
 	select {
 	case b.cmdBuffer <- cmd:
-		log.Trace("cmd sent")
+		// do nothing
 	default:
 		errChanToSend <- ErrCommandBufferExceeded
 
