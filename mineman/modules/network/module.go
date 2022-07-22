@@ -19,6 +19,7 @@ import (
 type (
 	Settings struct {
 		Enabled         bool          `mapstructure:"enabled"`
+		Timeout         time.Duration `mapstructure:"timeout"`
 		InitialInterval time.Duration `mapstructure:"initial_interval"`
 		MaxInterval     time.Duration `mapstructure:"max_interval"`
 		Count           int           `mapstructure:"count"`
@@ -69,13 +70,13 @@ func (m *Module) runPing(ctx context.Context) {
 
 	// TODO: refactor with state machine
 	for {
-		timeout := b.NextBackOff()
-		log.Trace("waiting backoff timeout", log.WithField("timeout", timeout.String()))
+		waitDuration := b.NextBackOff()
+		log.Trace("waiting backoff timeout", log.WithField("wait_duration", waitDuration.String()))
 		select {
 		case <-ctx.Done():
 			return
 			// re run the tests
-		case <-time.After(timeout):
+		case <-time.After(waitDuration):
 			log.Debug("doing ping...")
 			if err := m.doPing(ctx); err != nil {
 				if errCount > 0 && okCount > 0 {
@@ -135,7 +136,7 @@ func (m *Module) runPing(ctx context.Context) {
 }
 
 func (m *Module) doPing(ctx context.Context) error {
-	newCtx, cancel := context.WithCancel(ctx)
+	newCtx, cancel := context.WithTimeout(ctx, m.settings.Timeout)
 	defer cancel()
 
 	var (
@@ -146,7 +147,7 @@ func (m *Module) doPing(ctx context.Context) error {
 	)
 
 	for _, target := range m.settings.Targets {
-		p, err := icmp.Ping(ctx, target, icmp.PingCount(m.settings.Count))
+		p, err := icmp.Ping(newCtx, target, icmp.PingCount(m.settings.Count))
 		if err != nil {
 			return err
 		}
@@ -199,6 +200,7 @@ func New() *Module {
 	return &Module{
 		settings: Settings{
 			Enabled:         false,
+			Timeout:         time.Second * 5,
 			InitialInterval: time.Second * 10,
 			MaxInterval:     time.Second * 30,
 			LossThreshold:   0.2,
