@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"github.com/euiko/tooyoul/mineman/pkg/app"
 
 	"github.com/euiko/tooyoul/mineman/pkg/event"
@@ -13,7 +15,7 @@ import (
 
 func main() {
 	app := app.New("mineman", newHook(), event.NewHook(), app.NewWebHook())
-	if err := app.Run(); err != nil {
+	if err := app.Run(context.Background()); err != nil {
 		println("error running app :", err)
 		return
 	}

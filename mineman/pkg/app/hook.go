@@ -14,7 +14,7 @@ type Waiter interface {
 
 type Hook interface {
 	api.Module
-	Run(ctx context.Context) Waiter
+	Run(ctx context.Context) error
 }
 
 type HookModuleExt interface {
@@ -38,7 +38,7 @@ type chainedWaiter struct {
 	waiters []Waiter
 }
 
-type ChanWaiter struct {
+type chanWaiter struct {
 	manage  bool
 	channel chan error
 }
@@ -65,15 +65,26 @@ func (h *chainedHook) Close(ctx context.Context) error {
 	return nil
 }
 
-func (h *chainedHook) Run(ctx context.Context) Waiter {
+func (h *chainedHook) Run(ctx context.Context) error {
+
+	waiters := make([]Waiter, len(h.hooks))
+	for i, h := range h.hooks {
+		errChan := make(chan error, 1)
+		w := NewChanWaiter(errChan)
+
+		// run in go routne
+		go func(w *chanWaiter, h Hook) {
+			w.channel <- h.Run(ctx)
+		}(w, h)
+
+		waiters[i] = w
+	}
 
 	w := &chainedWaiter{
-		waiters: make([]Waiter, len(h.hooks)),
+		waiters: waiters,
 	}
-	for i, h := range h.hooks {
-		w.waiters[i] = h.Run(ctx)
-	}
-	return w
+	err := <-w.Wait()
+	return err
 }
 
 func (h *chainedHook) ModuleLoaded(ctx context.Context, m api.Module) {
@@ -163,25 +174,25 @@ func (w *chainedWaiter) Wait() <-chan error {
 	return errChan
 }
 
-func (w *ChanWaiter) Wait() <-chan error {
+func (w *chanWaiter) Wait() <-chan error {
 	if w.manage {
 		close(w.channel)
 	}
 	return w.channel
 }
 
-func NewChanWaiter(channel chan error) *ChanWaiter {
-	return &ChanWaiter{
+func NewChanWaiter(channel chan error) *chanWaiter {
+	return &chanWaiter{
 		channel: channel,
 		manage:  false,
 	}
 }
 
-func NewDirectWaiter(initial error) *ChanWaiter {
+func NewDirectWaiter(initial error) *chanWaiter {
 	// use buffered chan, so it can be used in the same thread
 	errChan := make(chan error, 1)
 	errChan <- initial
-	return &ChanWaiter{
+	return &chanWaiter{
 		channel: errChan,
 		manage:  true,
 	}
