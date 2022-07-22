@@ -200,6 +200,7 @@ func New() *Module {
 	return &Module{
 		settings: Settings{
 			Enabled:         false,
+			Timeout:         time.Second * 5,
 			InitialInterval: time.Second * 10,
 			MaxInterval:     time.Second * 30,
 			LossThreshold:   0.2,
