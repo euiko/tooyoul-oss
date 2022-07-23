@@ -64,7 +64,7 @@ func (h *WebHook) ModuleInitialized(ctx context.Context, m api.Module) {
 	}
 }
 
-func (h *WebHook) Run(ctx context.Context) Waiter {
+func (h *WebHook) Run(ctx context.Context) error {
 
 	// skip if disabled
 	if !h.option.Enabled {
@@ -107,8 +107,7 @@ func (h *WebHook) Run(ctx context.Context) Waiter {
 	}
 
 	h.server.Handler = router
-	go h.start(ctx)
-	return NewChanWaiter(h.errChan)
+	return h.start(ctx)
 }
 
 func (h *WebHook) handleWithMiddlewares(handler http.Handler, mws ...api.Middleware) http.Handler {
@@ -121,15 +120,13 @@ func (h *WebHook) handleWithMiddlewares(handler http.Handler, mws ...api.Middlew
 	}), mws[1:]...)
 }
 
-func (h *WebHook) start(ctx context.Context) {
+func (h *WebHook) start(ctx context.Context) error {
 	log.Trace("starting web service...")
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Error("failed when listen and serve http", log.WithError(err))
-		h.errChan <- err
-	} else {
-		h.errChan <- nil
+		return err
 	}
-	close(h.errChan)
+
+	return nil
 }
 
 func (h *WebHook) stop(ctx context.Context) error {

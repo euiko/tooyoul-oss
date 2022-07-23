@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/euiko/tooyoul/mineman/pkg/app"
 	"github.com/euiko/tooyoul/mineman/pkg/app/api"
 	"github.com/euiko/tooyoul/mineman/pkg/config"
 	"github.com/euiko/tooyoul/mineman/pkg/log"
@@ -98,18 +97,17 @@ func (h *Hook) ModuleInitialized(ctx context.Context, m api.Module) {
 	}
 }
 
-func (h *Hook) Run(ctx context.Context) app.Waiter {
-
+func (h *Hook) Run(ctx context.Context) error {
 	for i, sink := range h.sinks {
 		sub := h.broker.SubscribeHandler(ctx, sink.Topic, sink.Handler)
 		if err := sub.Error(); err != nil {
-			return app.NewDirectWaiter(err)
+			return err
 		}
 
 		h.subscriptions.Store(i, sub)
 	}
 
-	return app.NewDirectWaiter(nil)
+	return nil
 }
 
 func NewHook() *Hook {

@@ -27,10 +27,10 @@ func (a *App) Inject(vals ...interface{}) {
 	a.injectedVals = append(a.injectedVals, vals...)
 }
 
-func (a *App) Run() error {
+func (a *App) Run(ctx context.Context) error {
 	// initialize logger
 	l := log.NewLogrusLogger()
-	ctx := log.InjectContext(context.Background(), l)
+	ctx = log.InjectContext(ctx, l)
 	ctx, cancel := context.WithCancel(ctx)
 
 	// load config
@@ -143,13 +143,8 @@ func (a *App) run(ctx context.Context) error {
 
 	log.Trace("running hook")
 	defer log.Trace("hook run done")
-	waiter := a.hook.Run(ctx)
-	if waiter == nil {
-		return nil
-	}
 
-	err := <-waiter.Wait()
-	return err
+	return a.hook.Run(ctx)
 }
 
 func New(name string, hooks ...Hook) *App {
