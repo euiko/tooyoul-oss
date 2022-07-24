@@ -147,7 +147,7 @@ func (m *Module) doPing(ctx context.Context) error {
 	)
 
 	for _, target := range m.settings.Targets {
-		p, err := icmp.Ping(newCtx, target, icmp.PingCount(m.settings.Count))
+		p, err := icmp.Ping(newCtx, target, icmp.PingCount(m.settings.Count), icmp.PingTimeout(m.settings.Timeout))
 		if err != nil {
 			return err
 		}

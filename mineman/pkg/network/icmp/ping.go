@@ -28,6 +28,7 @@ type (
 		target   string
 		targetIP net.IP
 		interval time.Duration
+		timeout  time.Duration
 	}
 
 	PingResult struct {
@@ -84,6 +85,12 @@ func PingCount(count int) PingOption {
 	}
 }
 
+func PingTimeout(timeout time.Duration) PingOption {
+	return func(p *PingRequest) {
+		p.timeout = timeout
+	}
+}
+
 func Ping(ctx context.Context, target string, opts ...PingOption) (*Pinging, error) {
 	var (
 		err error
@@ -93,6 +100,7 @@ func Ping(ctx context.Context, target string, opts ...PingOption) (*Pinging, err
 		target:   target,
 		count:    3,
 		interval: time.Second,
+		timeout:  5 * time.Second,
 	}
 	for _, opt := range opts {
 		opt(&req)
@@ -149,6 +157,10 @@ func runPing(ctx context.Context, conn *icmp.PacketConn, req *PingRequest, pingi
 		case <-pinging.Done():
 			return
 		case <-time.After(req.interval):
+
+			// set additional parameters
+			conn.SetDeadline(time.Now().Add(req.timeout))
+
 			if req.count > 0 && seq <= req.count {
 				doPing(seq, conn, req, pinging)
 				seq++
@@ -173,7 +185,6 @@ func doPing(seq int, conn *icmp.PacketConn, req *PingRequest, pinging *Pinging) 
 			Data: []byte(PingPayload),
 		},
 	}
-
 	// make write buffer and write to the connection
 	wb, err := msg.Marshal(nil)
 	if err != nil {
